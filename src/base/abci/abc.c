@@ -24,7 +24,7 @@
 #include "proof/fraig/fraig.h"
 #include "opt/fxu/fxu.h"
 #include "opt/fxch/Fxch.h"
-#include "opt/fxchcuda/Fxchcuda.h"
+#include "opt/fxchcuda/FxchCuda.h"
 #include "opt/cut/cut.h"
 #include "map/fpga/fpga.h"
 #include "map/if/if.h"
@@ -4878,8 +4878,8 @@ static int Abc_CommandFxchCuda( Abc_Frame_t * pAbc, int argc, char ** argv )
     return 0;
 
 usage:
-    Abc_Print( -2, "usage: fxch [-N <num>] [-svwh]\n");
-    Abc_Print( -2, "\t           performs fast extract with cube hashing on the current network\n");
+    Abc_Print( -2, "usage: fxchcuda [-N <num>] [-svwh]\n");
+    Abc_Print( -2, "\t           performs fast extract with gpu accelerated cube hashing on the current network\n");
     Abc_Print( -2, "\t-N <num> : max number of divisors to extract during this run [default = unused]\n" );
     Abc_Print( -2, "\t-v       : print verbose information [default = %s]\n", fVerbose? "yes": "no" );
     Abc_Print( -2, "\t-w       : print additional information [default = %s]\n", fVeryVerbose? "yes": "no" );
