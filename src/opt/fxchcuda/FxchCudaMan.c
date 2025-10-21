@@ -2,9 +2,9 @@
 
   FileName    [ FxchCudaMan.c ]
 
-  PackageName [ Fast eXtract with GPU Accelerated Cube Hashing (FXCH) ]
+  PackageName [ Fast eXtract with GPU Accelerated Cube Hashing (FXCHCUDA) ]
 
-  Synopsis    [ Fxch Manager implementation ]
+  Synopsis    [ FxchCuda Manager implementation ]
 
   Author      [ Bruno Schmitt - boschmitt at inf.ufrgs.br ]
 
@@ -15,7 +15,7 @@
   Revision    []
 
 ***********************************************************************/
-#include "Fxch.h"
+#include "FxchCuda.h"
 
 ABC_NAMESPACE_IMPL_START
 

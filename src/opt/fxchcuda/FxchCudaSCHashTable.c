@@ -2,7 +2,7 @@
 
   FileName    [ FxchCudaSCHashTable.c ]
 
-  PackageName [ Fast eXtract with GPU Accelerated Cube Hashing (FXCH) ]
+  PackageName [ Fast eXtract with GPU Accelerated Cube Hashing (FXCHCUDA) ]
 
   Synopsis    [ Sub-cubes hash table implementation ]
 

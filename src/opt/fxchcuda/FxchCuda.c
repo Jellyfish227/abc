@@ -2,7 +2,7 @@
 
   FileName    [ FxchCuda.c ]
 
-  PackageName [ Fast eXtract with GPU accelerated Cube Hashing (FXCH) ]
+  PackageName [ Fast eXtract with GPU accelerated Cube Hashing (FXCHCUDA) ]
 
   Synopsis    [ The entrance into the GPU accelerated fast extract module. ]
 
@@ -199,9 +199,9 @@ int Fxch_FastExtract( Vec_Wec_t* vCubes,
     if ( fVerbose )
     {
         Fxch_ManPrintStats( pFxchMan );
-        Abc_PrintTime( 1, "\n[FXCH] Elapsed Time", pFxchMan->timeInit + pFxchMan->timeExt );
-        Abc_PrintTime( 1, "[FXCH]    +-> Init", pFxchMan->timeInit );
-        Abc_PrintTime( 1, "[FXCH]    +-> Extr", pFxchMan->timeExt );
+        Abc_PrintTime( 1, "\n[FXCHCUDA] Elapsed Time", pFxchMan->timeInit + pFxchMan->timeExt );
+        Abc_PrintTime( 1, "[FXCHCUDA]    +-> Init", pFxchMan->timeInit );
+        Abc_PrintTime( 1, "[FXCHCUDA]    +-> Extr", pFxchMan->timeExt );
     }
 
     Fxch_CubesUnGruping( pFxchMan );
@@ -237,7 +237,7 @@ int Abc_NtkFxchPerform( Abc_Ntk_t* pNtk,
 
     if ( !Abc_NtkFxCheck( pNtk ) )
     {
-        printf( "Abc_NtkFxchPerform(): Nodes have duplicated fanins. FXCH is not performed.\n" );
+        printf( "Abc_NtkFxchPerform(): Nodes have duplicated fanins. FXCHCUDA is not performed.\n" );
         return 0;
     }
 
@@ -253,7 +253,7 @@ int Abc_NtkFxchPerform( Abc_Ntk_t* pNtk,
         return 1;
     }
     else
-        printf( "Warning: The network has not been changed by \"fxch\".\n" );
+        printf( "Warning: The network has not been changed by \"fxchcuda\".\n" );
 
     Vec_WecFree( vCubes );
 

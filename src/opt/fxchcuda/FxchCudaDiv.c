@@ -2,7 +2,7 @@
 
   FileName    [ FxchCudaDiv.c ]
 
-  PackageName [ Fast eXtract with GPU Accelerated Cube Hashing (FXCH) ]
+  PackageName [ Fast eXtract with GPU Accelerated Cube Hashing (FXCHCUDA) ]
 
   Synopsis    [ Divisor handling functions ]
 

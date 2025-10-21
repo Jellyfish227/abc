@@ -2,7 +2,7 @@
 
   FileName    [ FxchCuda.h ]
 
-  PackageName [ Fast eXtract with GPU accelerated Cube Hashing (FXCH) ]
+  PackageName [ Fast eXtract with GPU accelerated Cube Hashing (FXCHCUDA) ]
 
   Synopsis    [ External declarations of fast extract with GPU accelerated cube hashing. ]
 
@@ -156,11 +156,11 @@ static inline int Fxch_CountOnes( unsigned num )
     return  ( num & 0x0000FFFF ) + ( num >> 16 );
 }
 
-/*===== Fxch.c =======================================================*/
+/*===== FxchCuda.c =======================================================*/
 int Abc_NtkFxchPerform( Abc_Ntk_t* pNtk, int nMaxDivExt, int fVerbose, int fVeryVerbose );
 int Fxch_FastExtract( Vec_Wec_t* vCubes, int ObjIdMax, int nMaxDivExt, int fVerbose, int fVeryVerbose );
 
-/*===== FxchDiv.c ====================================================================================================*/
+/*===== FxchCudaDiv.c ====================================================================================================*/
 int  Fxch_DivCreate( Fxch_Man_t* pFxchMan,  Fxch_SubCube_t* pSubCube0, Fxch_SubCube_t* pSubCube1 );
 int  Fxch_DivAdd( Fxch_Man_t* pFxchMan, int fUpdate, int fSingleCube, int fBase );
 int  Fxch_DivRemove( Fxch_Man_t* pFxchMan, int fUpdate, int fSingleCube, int fBase );
@@ -169,7 +169,7 @@ int  Fxch_DivRemoveLits( Vec_Int_t* vCube0, Vec_Int_t* vCube1, Vec_Int_t* vDiv, 
 void Fxch_DivPrint( Fxch_Man_t* pFxchMan, int iDiv );
 int Fxch_DivIsNotConstant1( Vec_Int_t* vDiv );
 
-/*===== FxchMan.c ====================================================================================================*/
+/*===== FxchCudaMan.c ====================================================================================================*/
 Fxch_Man_t* Fxch_ManAlloc( Vec_Wec_t* vCubes );
 void  Fxch_ManFree( Fxch_Man_t* pFxchMan );
 void  Fxch_ManMapLiteralsIntoCubes( Fxch_Man_t* pFxchMan, int nVars );
@@ -197,7 +197,7 @@ static inline int Fxch_ManGetLit( Fxch_Man_t* pFxchMan,
     return Vec_IntEntry( Vec_WecEntry(pFxchMan->vCubes, iCube), iLit );
 }
 
-/*===== FxchSCHashTable.c ============================================*/
+/*===== FxchCudaSCHashTable.c ============================================*/
 Fxch_SCHashTable_t* Fxch_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries );
 
 void Fxch_SCHashTableDelete( Fxch_SCHashTable_t* );
