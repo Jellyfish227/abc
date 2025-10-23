@@ -29,13 +29,13 @@ ABC_NAMESPACE_IMPL_START
 
 // These are all wrappers with fallbacks to the original fxch implementation
 
-Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, bool usingGpu )
+Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu )
 {
-    return usingGpu ? NULL : Fxch_SCHashTableCreate(pFxchMan, nEntries);
+    return (usingGpu == 1) ? NULL : Fxch_SCHashTableCreate(pFxchMan, nEntries);
 }
 
 
-void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable, bool usingGpu)
+void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable, short int usingGpu)
 {
     return usingGpu ? NULL : Fxch_SCHashTableDelete(pSCHashTable);
 }
@@ -47,9 +47,9 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
                             uint32_t iLit0,
                             uint32_t iLit1,
                             char fUpdate,
-                            bool usingGpu )
+                            short int usingGpu )
 {
-    return usingGpu ? NULL : Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
+    return (usingGpu == 1) ? NULL : Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
 }
 
 
@@ -60,21 +60,21 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
                             uint32_t iLit0,
                             uint32_t iLit1,
                             char fUpdate,
-                            bool usingGpu )
+                            short int usingGpu )
 {
-    return usingGpu ? NULL : Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
+    return (usingGpu == 1) ? NULL : Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
 }
 
 
-unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, bool usingGpu) 
+unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, short int usingGpu) 
 {
-    return usingGpu ? NULL : Fxch_SCHashTableMemory(pHashTable);
+    return (usingGpu == 1) ? NULL : Fxch_SCHashTableMemory(pHashTable);
 }
 
 
-void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable, bool usingGpu)
+void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable, short int usingGpu)
 {
-    return usingGpu ? NULL : Fxch_SCHashTablePrint(pHashTable);
+    return (usingGpu == 1) ? NULL : Fxch_SCHashTablePrint(pHashTable);
 };
 ////////////////////////////////////////////////////////////////////////
 ///                       END OF FILE                                ///

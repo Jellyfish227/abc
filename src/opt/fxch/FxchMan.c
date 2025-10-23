@@ -18,7 +18,7 @@
 #include "Fxch.h"
 #include "FxchCuda.h"
 
-#define USINGGPU true // if you want to use the old implementation, ***
+#define USINGGPU 1 // if you want to use the old implementation, ***
 
 ABC_NAMESPACE_IMPL_START
 
