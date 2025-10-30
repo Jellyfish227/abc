@@ -16,7 +16,7 @@
 
 ***********************************************************************/
 #include "Fxch.h"
-#include "FxchCuda.h"
+#include "../fxchcuda/FxchCuda.h"
 
 #define USINGGPU 1 // if you want to use the old implementation, ***
 
