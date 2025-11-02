@@ -36,6 +36,40 @@ Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntri
         return Fxch_SCHashTableCreate(pFxchMan, nEntries);
     }
     
+    Vec_Wec_t* tbsCubes = pFxchMan->vCubes; // To Be Serialzied Cubes
+
+    int totalElements = Vec_WecSizeSize(tbsCubes);
+    int numCubes = Vec_WecSize(tbsCubes);
+
+    /*  
+        For Jellyfish: 
+        Today I learned that I can create arrays on the heap with malloc, 
+        I've never done this before so make sure this is right before proceeding
+    */
+
+    int* flatData = ABC_ALLOC(int, totalElements); // array that stores every literal
+    int* levelSizes = ABC_ALLOC(int, numCubes); // array that stores number of literals for each cube
+
+    int offset = 0;
+    Vec_Int_t* vLevel;
+    int i;
+    
+    Vec_WecForEachLevel(tbsCubes, vLevel, i) {
+        int levelSize = Vec_IntSize(vLevel);
+        levelSizes[i] = levelSize;
+        memcpy(flatData + offset, Vec_IntArray(vLevel), levelSize * sizeof(int)); // copies each cube into the flat array 
+        offset += levelSize;
+    }
+
+    // Call GPU function (defined in .cu file)
+    Fxch_SCHashTable_t* result = FxchCuda_TransferAndAllocateGPU(
+        flatData, levelSizes, totalElements, numCubes, nEntries
+    );
+    
+    // I will free it, we are not developing escape from tarkov :)
+    free(flatData);
+    free(levelSizes);
+    return result;
 }
 
 

@@ -65,6 +65,22 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
 unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* , short int usingGpu);
 void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* , short int usingGpu);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+Fxch_SCHashTable_t* FxchCuda_TransferAndAllocateGPU(
+    int* flatData, 
+    int* levelSizes, 
+    int totalElements, 
+    int numLevels, 
+    int nEntries
+);
+
+#ifdef __cplusplus
+}
+#endif
+
 
 ABC_NAMESPACE_HEADER_END
 
