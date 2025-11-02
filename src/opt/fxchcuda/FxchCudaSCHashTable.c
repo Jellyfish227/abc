@@ -31,13 +31,21 @@ ABC_NAMESPACE_IMPL_START
 
 Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu )
 {
-    return (usingGpu == 1) ? NULL : Fxch_SCHashTableCreate(pFxchMan, nEntries);
+    // Early exit
+    if (!usingGpu) {
+        return Fxch_SCHashTableCreate(pFxchMan, nEntries);
+    }
+    
 }
 
 
 void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable, short int usingGpu)
 {
-    return usingGpu ? NULL : Fxch_SCHashTableDelete(pSCHashTable);
+    // Early exit
+    if (!usingGpu) {
+        Fxch_SCHashTableDelete(pSCHashTable);
+        return;
+    }
 }
 
 int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
@@ -49,7 +57,10 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
                             char fUpdate,
                             short int usingGpu )
 {
-    return (usingGpu == 1) ? NULL : Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
+    // Early exit
+    if (!usingGpu) {
+        return Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
+    }
 }
 
 
@@ -62,20 +73,32 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
                             char fUpdate,
                             short int usingGpu )
 {
-    return (usingGpu == 1) ? NULL : Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
+    // Early exit
+    if (!usingGpu) {
+        return Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
+    }
+
 }
 
 
 unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, short int usingGpu) 
 {
-    return (usingGpu == 1) ? NULL : Fxch_SCHashTableMemory(pHashTable);
+    // Early exit
+    if (!usingGpu) {
+        return Fxch_SCHashTableMemory(pHashTable);
+    }
 }
 
 
 void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable, short int usingGpu)
 {
-    return (usingGpu == 1) ? NULL : Fxch_SCHashTablePrint(pHashTable);
+    // Early exit
+    if (!usingGpu) {
+        Fxch_SCHashTablePrint(pHashTable);
+        return;
+    }
 };
+
 ////////////////////////////////////////////////////////////////////////
 ///                       END OF FILE                                ///
 ////////////////////////////////////////////////////////////////////////
