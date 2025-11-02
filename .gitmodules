@@ -1,0 +1,3 @@
+[submodule "lib/extern/cuCollections"]
+	path = lib/extern/cuCollections
+	url = https://github.com/NVIDIA/cuCollections.git

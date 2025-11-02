@@ -2,6 +2,7 @@
 CC   := gcc
 CXX  := g++
 AR   := ar
+NVCC := nvcc
 LD   := $(CXX)
 
 MSG_PREFIX ?=
@@ -56,6 +57,9 @@ endif
 ARCHFLAGS := $(ARCHFLAGS)
 
 OPTFLAGS  ?= -O
+
+# cuCollection
+CUDA_INCLUDE_FLAGS = -Ilib/extern/cuCollections/include
 
 CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
 LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses
@@ -153,7 +157,7 @@ ifdef ABC_USE_LIBSTDCXX
 endif
 
 $(info $(MSG_PREFIX)Using CFLAGS=$(CFLAGS))
-CXXFLAGS += $(CFLAGS) -std=c++17 -fno-exceptions
+CXXFLAGS += $(CFLAGS) $(CUDA_INCLUDE_FLAGS) -std=c++17 -fno-exceptions
 
 SRC  :=
 GARBAGE := core core.* *.stackdump ./tags $(PROG) arch_flags
@@ -232,7 +236,7 @@ lib$(PROG).a: $(LIBOBJ)
 
 lib$(PROG).so: $(LIBOBJ)
 	@echo "$(MSG_PREFIX)\`\` Linking:" $(notdir $@)
-	$(VERBOSE)$(CXX) -shared -o $@ $^ $(LIBS) -pg -g
+	$(VERBOSE)$(NVCC) -shared -o $@ $^ $(LIBS) -pg -g
 
 docs:
 	@echo "$(MSG_PREFIX)\`\` Building documentation." $(notdir $@)
