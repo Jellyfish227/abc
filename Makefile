@@ -57,7 +57,7 @@ ARCHFLAGS := $(ARCHFLAGS)
 
 OPTFLAGS  ?= -O
 
-CFLAGS    += -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
+CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
 LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses
 ifneq ($(findstring arm,$(shell uname -m)),)
 	CFLAGS += -DABC_MEMALIGN=4
@@ -224,15 +224,15 @@ tags:
 
 $(PROG): $(OBJ)
 	@echo "$(MSG_PREFIX)\`\` Building binary:" $(notdir $@)
-	$(VERBOSE)$(LD) -o $@ $^ $(LDFLAGS) $(LIBS) -pg
+	$(VERBOSE)$(LD) -o $@ $^ $(LDFLAGS) $(LIBS) -pg -g
 
 lib$(PROG).a: $(LIBOBJ)
 	@echo "$(MSG_PREFIX)\`\` Linking:" $(notdir $@)
-	$(VERBOSE)$(AR) rsv $@ $? -pg
+	$(VERBOSE)$(AR) rsv $@ $? -pg -g
 
 lib$(PROG).so: $(LIBOBJ)
 	@echo "$(MSG_PREFIX)\`\` Linking:" $(notdir $@)
-	$(VERBOSE)$(CXX) -shared -o $@ $^ $(LIBS) -pg
+	$(VERBOSE)$(CXX) -shared -o $@ $^ $(LIBS) -pg -g
 
 docs:
 	@echo "$(MSG_PREFIX)\`\` Building documentation." $(notdir $@)
