@@ -146,16 +146,16 @@ static inline int Fxch_SCHashTableEntryCompare( Fxch_SCHashTable_t* pSCHashTable
     // Allocate managed memory for GPU access
     int* pOutputID0;
     int* pOutputID1;
-    cudaMallocManaged(&pOutputID0, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
-    cudaMallocManaged(&pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
+    cudaMallocManaged(&pOutputID0, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), cudaMemAttachGlobal);
+    cudaMallocManaged(&pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), cudaMemAttachGlobal);
     
     // Copy data from host to managed memory
     memcpy(pOutputID0, pOutputID0_host, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
     memcpy(pOutputID1, pOutputID1_host, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
     
     // Memory prefetching to the GPU memory
-    cudaMemPrefetchAsync(pOutputID0, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), 0);
-    cudaMemPrefetchAsync(pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), 0);
+    cudaMemPrefetchAsync(pOutputID0, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), 0, 0);
+    cudaMemPrefetchAsync(pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), 0, 0);
 
     Result = launch_kernel(pOutputID0, pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID);
 
