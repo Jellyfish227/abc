@@ -61,8 +61,11 @@ OPTFLAGS  ?= -O
 # cuCollection
 CUDA_INCLUDE_FLAGS = -Ilib/extern/cuCollections/include
 
+CUDA_FLAGS += -g -pg
+INCLUDES += -I/opt1/cuda/cuda-12.1/include
+
 CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
-LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses
+LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses -L/opt1/cuda/cuda-12.1/lib64 -lcudart
 ifneq ($(findstring arm,$(shell uname -m)),)
 	CFLAGS += -DABC_MEMALIGN=4
 endif
@@ -192,6 +195,11 @@ DEP := $(OBJ:.o=.d)
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Compiling:" $(LOCAL_PATH)/$<
 	$(VERBOSE)$(CXX) -c $(OPTFLAGS) $(INCLUDES) $(CXXFLAGS) $< -o $@
+
+%.o: %.cu
+	@mkdir -p $(dir $@)
+	@echo "$(MSG_PREFIX)\`\` Compiling:" $(LOCAL_PATH)/$<
+	$(VERBOSE)$(NVCC) -c $(OPTFLAGS) $(INCLUDES) $(CUDA_FLAGS) $< -o $@
 
 %.d: %.c
 	@mkdir -p $(dir $@)
