@@ -173,6 +173,7 @@ OBJ := \
 	$(patsubst %.cc, %.o, $(filter %.cc, $(SRC))) \
 	$(patsubst %.cpp, %.o, $(filter %.cpp, $(SRC))) \
 	$(patsubst %.c, %.o,  $(filter %.c, $(SRC)))  \
+	$(patsubst %.cu, %.o,  $(filter %.cu, $(SRC)))  \
 	$(patsubst %.y, %.o,  $(filter %.y, $(SRC)))
 
 LIBOBJ := $(filter-out src/base/main/main.o,$(OBJ))
@@ -215,6 +216,11 @@ DEP := $(OBJ:.o=.d)
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Generating dependency:" $(LOCAL_PATH)/$<
 	$(VERBOSE)$(ABCSRC)/depends.sh "$(CXX)" `dirname $*.cpp` $(OPTFLAGS) $(INCLUDES) $(CXXFLAGS) $< > $@
+
+%.d: %.cu
+	@mkdir -p $(dir $@)
+	@echo "$(MSG_PREFIX)\`\` Generating dependency:" $(LOCAL_PATH)/$<
+	$(VERBOSE)$(ABCSRC)/depends.sh "$(NVCC)" `dirname $*.cu` $(OPTFLAGS) $(INCLUDES) $(CUDA_FLAGS) $< > $@
 
 ifndef ABC_MAKE_NO_DEPS
 -include $(DEP)
