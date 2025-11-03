@@ -16,6 +16,7 @@
 
 ***********************************************************************/
 #include "Fxch.h"
+#include <cuda_runtime.h>
 
 #if (__GNUC__ >= 8)
   #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
@@ -129,18 +130,41 @@ static inline int Fxch_SCHashTableEntryCompare( Fxch_SCHashTable_t* pSCHashTable
     Vec_Int_t* vCube0 = Vec_WecEntry( vCubes, pSCData0->iCube ),
              * vCube1 = Vec_WecEntry( vCubes, pSCData1->iCube );
 
-    int* pOutputID0 = Vec_IntEntryP( pSCHashTable->pFxchMan->vOutputID, pSCData0->iCube * pSCHashTable->pFxchMan->nSizeOutputID ),
-       * pOutputID1 = Vec_IntEntryP( pSCHashTable->pFxchMan->vOutputID, pSCData1->iCube * pSCHashTable->pFxchMan->nSizeOutputID );
     int i, Result = 0;
 
+    // Early checks BEFORE allocating memory to avoid leaks
     if ( !Vec_IntSize( vCube0 ) ||
          !Vec_IntSize( vCube1 ) ||
          Vec_IntEntry( vCube0, 0 ) != Vec_IntEntry( vCube1, 0 ) || // First entry check for the output node ID
          pSCData0->Id != pSCData1->Id ) // Check if they have the same literal
         return 0;
 
-    for ( i = 0; i < pSCHashTable->pFxchMan->nSizeOutputID && Result == 0; i++ )
-        Result = ( pOutputID0[i] & pOutputID1[i] );
+    // Get pointers to the original data
+    int* pOutputID0_host = Vec_IntEntryP( pSCHashTable->pFxchMan->vOutputID, pSCData0->iCube * pSCHashTable->pFxchMan->nSizeOutputID );
+    int* pOutputID1_host = Vec_IntEntryP( pSCHashTable->pFxchMan->vOutputID, pSCData1->iCube * pSCHashTable->pFxchMan->nSizeOutputID );
+    
+    // Allocate managed memory for GPU access
+    int* pOutputID0;
+    int* pOutputID1;
+    cudaMallocManaged(&pOutputID0, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
+    cudaMallocManaged(&pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
+    
+    // Copy data from host to managed memory
+    memcpy(pOutputID0, pOutputID0_host, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
+    memcpy(pOutputID1, pOutputID1_host, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int));
+    
+    // Memory prefetching to the GPU memory
+    cudaMemPrefetchAsync(pOutputID0, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), 0);
+    cudaMemPrefetchAsync(pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID * sizeof(int), 0);
+
+    Result = launch_kernel(pOutputID0, pOutputID1, pSCHashTable->pFxchMan->nSizeOutputID);
+
+    // Synchronization is handled inside launch_kernel
+    cudaFree(pOutputID0);
+    cudaFree(pOutputID1);
+
+    // for ( i = 0; i < pSCHashTable->pFxchMan->nSizeOutputID && Result == 0; i++ )
+    //     Result = ( pOutputID0[i] & pOutputID1[i] );
 
     if ( Result == 0 )
         return 0;

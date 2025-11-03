@@ -219,6 +219,9 @@ int Fxch_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
 unsigned int Fxch_SCHashTableMemory( Fxch_SCHashTable_t* );
 void Fxch_SCHashTablePrint( Fxch_SCHashTable_t* );
 
+/*===== Kernel.cu ============================================*/
+extern int launch_kernel(int* pOutputID0, int* pOutputID1, int size);
+
 ABC_NAMESPACE_HEADER_END
 
 #endif

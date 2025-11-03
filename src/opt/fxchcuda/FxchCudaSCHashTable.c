@@ -32,9 +32,9 @@ ABC_NAMESPACE_IMPL_START
 Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu )
 {
     // Early exit
-    if (!usingGpu) {
+    // if (!usingGpu) {
         return Fxch_SCHashTableCreate(pFxchMan, nEntries);
-    }
+    // }
     
 }
 
@@ -42,10 +42,10 @@ Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntri
 void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable, short int usingGpu)
 {
     // Early exit
-    if (!usingGpu) {
+    // if (!usingGpu) {
         Fxch_SCHashTableDelete(pSCHashTable);
         return;
-    }
+    // }
 }
 
 int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
@@ -58,9 +58,9 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
                             short int usingGpu )
 {
     // Early exit
-    if (!usingGpu) {
+    // if (!usingGpu) {
         return Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
-    }
+    // }
 }
 
 
@@ -74,9 +74,9 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
                             short int usingGpu )
 {
     // Early exit
-    if (!usingGpu) {
+    // if (!usingGpu) {
         return Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
-    }
+    // }
 
 }
 
@@ -84,19 +84,19 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
 unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, short int usingGpu) 
 {
     // Early exit
-    if (!usingGpu) {
+    // if (!usingGpu) {
         return Fxch_SCHashTableMemory(pHashTable);
-    }
+    // }
 }
 
 
 void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable, short int usingGpu)
 {
     // Early exit
-    if (!usingGpu) {
+    // if (!usingGpu) {
         Fxch_SCHashTablePrint(pHashTable);
         return;
-    }
+    // }
 };
 
 ////////////////////////////////////////////////////////////////////////

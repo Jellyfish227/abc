@@ -21,6 +21,7 @@
 
 #include "base/abc/abc.h"
 #include "opt/fxch/Fxch.h"
+#include <cuda_runtime.h>
 
 ABC_NAMESPACE_HEADER_START
 
@@ -65,6 +66,8 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
 unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* , short int usingGpu);
 void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* , short int usingGpu);
 
+/*===== Kernel.cu ============================================*/
+extern int launch_kernel(int *pOutputID0, int *pOutputID1, int size);
 
 ABC_NAMESPACE_HEADER_END
 
