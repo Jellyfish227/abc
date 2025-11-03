@@ -135,8 +135,8 @@ static inline int Fxch_SCHashTableEntryCompare( Fxch_SCHashTable_t* pSCHashTable
 
     if ( !Vec_IntSize( vCube0 ) ||
          !Vec_IntSize( vCube1 ) ||
-         Vec_IntEntry( vCube0, 0 ) != Vec_IntEntry( vCube1, 0 ) ||
-         pSCData0->Id != pSCData1->Id )
+         Vec_IntEntry( vCube0, 0 ) != Vec_IntEntry( vCube1, 0 ) || // First entry check for the output node ID
+         pSCData0->Id != pSCData1->Id ) // Check if they have the same literal
         return 0;
 
     for ( i = 0; i < pSCHashTable->pFxchMan->nSizeOutputID && Result == 0; i++ )
