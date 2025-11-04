@@ -61,8 +61,10 @@ OPTFLAGS  ?= -O
 # cuCollection
 CUDA_INCLUDE_FLAGS = -Ilib/extern/cuCollections/include
 
+INCLUDES += -I/opt1/cuda/cuda-12.1/include
+
 CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
-LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses
+LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses -lcudart -L/opt1/cuda/cuda-12.1/lib64
 ifneq ($(findstring arm,$(shell uname -m)),)
 	CFLAGS += -DABC_MEMALIGN=4
 endif
@@ -151,6 +153,18 @@ ifneq ($(OS), $(filter $(OS), FreeBSD OpenBSD NetBSD Darwin))
    LIBS += -lrt
 endif
 
+# Add CUDA runtime library if CUDA sources exist
+ifneq ($(CUDA_SRC),)
+  CUDA_LIBDIR ?= /usr/local/cuda/lib64
+  ifeq ($(OS), Darwin)
+    CUDA_LIBDIR = /usr/local/cuda/lib
+  endif
+  LIBS += -lcudart
+  LDFLAGS += -L$(CUDA_LIBDIR)
+  $(info $(MSG_PREFIX)Linking with CUDA runtime)
+endif
+
+
 ifdef ABC_USE_LIBSTDCXX
    LIBS += -lstdc++
    $(info $(MSG_PREFIX)Using explicit -lstdc++)
@@ -160,6 +174,7 @@ $(info $(MSG_PREFIX)Using CFLAGS=$(CFLAGS))
 CXXFLAGS += $(CFLAGS) $(CUDA_INCLUDE_FLAGS) -std=c++17 -fno-exceptions
 
 SRC  :=
+CUDA_SRC :=
 GARBAGE := core core.* *.stackdump ./tags $(PROG) arch_flags
 
 .PHONY: all default tags clean docs cmake_info
@@ -171,6 +186,10 @@ OBJ := \
 	$(patsubst %.cpp, %.o, $(filter %.cpp, $(SRC))) \
 	$(patsubst %.c, %.o,  $(filter %.c, $(SRC)))  \
 	$(patsubst %.y, %.o,  $(filter %.y, $(SRC)))
+
+# Add CUDA objects if CUDA sources exist
+CUDA_OBJ := $(patsubst %.cu, %.o, $(CUDA_SRC))
+OBJ += $(CUDA_OBJ)
 
 LIBOBJ := $(filter-out src/base/main/main.o,$(OBJ))
 
@@ -192,6 +211,12 @@ DEP := $(OBJ:.o=.d)
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Compiling:" $(LOCAL_PATH)/$<
 	$(VERBOSE)$(CXX) -c $(OPTFLAGS) $(INCLUDES) $(CXXFLAGS) $< -o $@
+
+# CUDA compilation rule
+%.o: %.cu
+	@mkdir -p $(dir $@)
+	@echo "$(MSG_PREFIX)\`\` Compiling CUDA:" $(LOCAL_PATH)/$<
+	$(VERBOSE)$(NVCC) -c -O3 -arch=sm_60 $(INCLUDES) -Xcompiler -fPIC $< -o $@
 
 %.d: %.c
 	@mkdir -p $(dir $@)

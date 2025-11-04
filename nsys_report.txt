@@ -1,0 +1,144 @@
+Processing [report1.sqlite] with [/opt1/cuda/cuda-12.1/nsight-systems-2023.1.2/host-linux-x64/rules/cuda_memcpy_async.py]... 
+
+ ** CUDA Async Memcpy with Pageable Memory (cuda_memcpy_async):
+
+There were no problems detected related to memcpy operations using pageable
+memory.
+
+Processing [report1.sqlite] with [/opt1/cuda/cuda-12.1/nsight-systems-2023.1.2/host-linux-x64/rules/cuda_memcpy_sync.py]... 
+
+ ** CUDA Synchronous Memcpy (cuda_memcpy_sync):
+
+The following are synchronous memory transfers that block the host. This does
+not include host to device transfers of a memory block of 64 KB or less.
+
+Suggestion: Use cudaMemcpy*Async() APIs instead.
+
+ Duration (ns)    Start (ns)     Src Kind  Dst Kind  Bytes (MB)     PID     Device ID  Context ID  Stream ID      API Name    
+ -------------  ---------------  --------  --------  ----------  ---------  ---------  ----------  ---------  ----------------
+    21,914,592  121,389,788,148  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    20,337,640  569,242,785,170  Pageable  Device        65.313  2,423,839          0           1          7  cudaMemcpy_v3020
+    20,056,420   27,774,877,133  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    19,832,817  163,978,940,716  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    19,452,883   86,594,626,198  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    19,438,608  659,541,124,283  Pageable  Device        66.082  2,423,839          0           1          7  cudaMemcpy_v3020
+    19,417,198  299,070,012,997  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    19,140,665   44,938,866,765  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    18,839,328  344,093,762,499  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    18,594,329  614,513,624,772  Pageable  Device        65.572  2,423,839          0           1          7  cudaMemcpy_v3020
+    18,259,402   59,818,140,401  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    18,119,372  704,580,375,408  Pageable  Device        67.530  2,423,839          0           1          7  cudaMemcpy_v3020
+    17,878,659  254,037,330,749  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    16,466,367  389,124,583,683  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    16,175,191  524,212,706,668  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    16,085,973  479,184,802,266  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    15,839,594  209,021,325,399  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    14,345,606  434,166,369,663  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    13,005,633  434,150,830,425  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    12,025,063  389,143,808,333  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    11,922,305  209,006,785,392  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    11,312,659  479,203,655,738  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    11,299,283  524,231,561,740  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+    10,984,843  659,563,052,175  Pageable  Device        66.082  2,423,839          0           1          7  cudaMemcpy_v3020
+    10,604,737  670,560,978,185  Pageable  Device        66.331  2,423,839          0           1          7  cudaMemcpy_v3020
+    10,142,802  254,057,815,175  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,883,213  614,534,776,195  Pageable  Device        65.572  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,503,962  121,414,471,036  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,347,998  701,373,992,477  Pageable  Device        67.419  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,312,988  277,686,191,873  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,265,565   18,967,276,229  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,235,512  196,684,527,573  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,230,266  330,974,677,809  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,209,816  223,608,004,089  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,156,249  344,115,137,031  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,077,111  411,941,611,536  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     9,051,030  562,339,488,197  Pageable  Device        65.294  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,969,395  565,730,865,235  Pageable  Device        65.305  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,959,667  304,427,362,504  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,956,947  566,239,795,402  Pageable  Device        65.305  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,928,946  384,581,347,905  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,905,168  223,555,250,570  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,899,527  105,801,629,658  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,835,056  704,569,069,053  Pageable  Device        67.530  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,783,182  659,025,970,952  Pageable  Device        66.072  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,762,862  426,251,425,166  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,744,621  527,482,095,704  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,734,277  111,545,576,043  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,719,279   14,083,315,940  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+     8,705,239   45,641,395,837  Pageable  Device        65.210  2,423,839          0           1          7  cudaMemcpy_v3020
+
+Only the top 50 results are displayed. More data may be available.
+
+
+Processing [report1.sqlite] with [/opt1/cuda/cuda-12.1/nsight-systems-2023.1.2/host-linux-x64/rules/cuda_memset_sync.py]... 
+SKIPPED: report1.sqlite could not be analyzed because it does not contain the required CUDA data. Does the application use CUDA memset APIs?
+
+Processing [report1.sqlite] with [/opt1/cuda/cuda-12.1/nsight-systems-2023.1.2/host-linux-x64/rules/cuda_api_sync.py]... 
+
+ ** CUDA Synchronization APIs (cuda_api_sync):
+
+The following are synchronization APIs that block the host until all issued
+CUDA calls are complete.
+
+Suggestions:
+   1. Avoid excessive use of synchronization.
+   2. Use asynchronous CUDA event calls, such as cudaStreamWaitEvent() and
+cudaEventSynchronize(), to prevent host synchronization.
+
+ Duration (ns)    Start (ns)        PID        TID              API Name          
+ -------------  ---------------  ---------  ---------  ---------------------------
+       269,522  694,769,938,864  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       265,969  693,627,771,608  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       265,005  697,246,401,897  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       264,869  693,848,695,441  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       264,236  695,632,105,282  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       264,221  658,450,892,834  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       264,088  693,478,629,357  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       264,080  694,083,024,831  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       263,891  695,218,450,894  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       263,630  694,735,267,249  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       263,577  693,079,314,511  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       263,497  661,252,407,093  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       263,411  692,873,758,089  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       263,245  694,538,673,211  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       263,028  653,616,197,258  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       262,456  658,249,065,103  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       262,322  691,256,925,743  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       262,244  695,244,824,781  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       262,130  694,875,309,226  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       262,031  691,551,043,148  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       261,980  697,283,949,159  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       261,747  695,360,895,880  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       261,672  693,034,177,414  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       261,557  693,264,286,128  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       261,529  716,660,644,163  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       261,170  653,297,195,830  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       261,100  693,273,288,480  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,736  694,458,129,675  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,388  661,001,385,279  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,315  656,413,609,170  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,259  692,684,053,275  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,100  692,487,925,304  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,099  656,800,059,589  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,077  694,279,058,156  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       260,010  657,349,419,547  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,863  659,054,048,462  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,837  688,796,435,209  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,779  690,873,456,522  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,633  660,694,924,146  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,590  687,312,084,682  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,588  661,766,584,840  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,580  718,795,634,316  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,568  693,982,325,989  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,393  660,811,221,853  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,334  655,965,567,111  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,329  660,570,425,205  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,324  694,708,854,953  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,072  656,699,370,354  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,064  658,359,428,008  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+       259,012  659,880,805,045  2,423,839  2,423,839  cudaDeviceSynchronize_v3020
+
+Only the top 50 results are displayed. More data may be available.
+
+
+Processing [report1.sqlite] with [/opt1/cuda/cuda-12.1/nsight-systems-2023.1.2/host-linux-x64/rules/gpu_gaps.py]... 

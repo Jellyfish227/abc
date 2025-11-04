@@ -55,7 +55,8 @@ static GPUDataCache_t g_GPUCache = {NULL, NULL, NULL, 0, 0, 0, 0};
 ////////////////////////////////////////////////////////////////////////
 
 // External CUDA kernel interface
-extern "C" int LaunchParallelEntryCompare(
+// Note: extern "C" is in the Kernel.cu file
+int LaunchParallelEntryCompare(
     void* pNewEntry,
     void* pBinEntries,
     int nBinSize,
@@ -227,11 +228,9 @@ static int PrepareCubeDataForGPU(
 
 Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu )
 {
-    // Early exit
-    if (!usingGpu) {
-        return Fxch_SCHashTableCreate(pFxchMan, nEntries);
-    }
-    
+    // For now, always use original implementation
+    // GPU-specific initialization can be added here if needed
+    return Fxch_SCHashTableCreate(pFxchMan, nEntries);
 }
 
 
@@ -530,10 +529,16 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
 
 unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, short int usingGpu) 
 {
-    // Early exit
-    if (!usingGpu) {
-        return Fxch_SCHashTableMemory(pHashTable);
+    // Memory usage is same as original plus cache
+    unsigned int memory = Fxch_SCHashTableMemory(pHashTable);
+    
+    if (usingGpu && g_GPUCache.pCubeData != NULL) {
+        // Add cache memory
+        memory += g_GPUCache.nTotalSize * sizeof(int);
+        memory += g_GPUCache.nMaxCube * sizeof(int) * 2; // offsets + sizes
     }
+    
+    return memory;
 }
 
 
