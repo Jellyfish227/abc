@@ -1,0 +1,6 @@
+[submodule "lib/extern/cuCollections"]
+	path = lib/extern/cuCollections
+	url = https://github.com/NVIDIA/cuCollections.git
+[submodule "lib/extern/cccl"]
+	path = lib/extern/cccl
+	url = https://github.com/NVIDIA/cccl.git

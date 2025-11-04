@@ -1,3 +1,5 @@
 ncurses*/
 readline*/
 share/
+
+extern/cccl_lib
