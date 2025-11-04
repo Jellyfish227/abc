@@ -2,6 +2,7 @@
 CC   := gcc
 CXX  := g++
 AR   := ar
+NVCC := nvcc
 LD   := $(CXX)
 
 MSG_PREFIX ?=
@@ -25,7 +26,7 @@ MODULES := \
 	src/misc/extra src/misc/mvc src/misc/st src/misc/util src/misc/nm \
 	src/misc/vec src/misc/hash src/misc/tim src/misc/bzlib src/misc/zlib \
 	src/misc/mem src/misc/bar src/misc/bbl src/misc/parse \
-	src/opt/cut src/opt/fxu src/opt/fxch src/opt/rwr src/opt/mfs src/opt/sim \
+	src/opt/cut src/opt/fxu src/opt/fxch src/opt/fxchcuda src/opt/rwr src/opt/mfs src/opt/sim \
 	src/opt/ret src/opt/fret src/opt/res src/opt/lpk src/opt/nwk src/opt/rwt src/opt/rar \
 	src/opt/cgt src/opt/csw src/opt/dar src/opt/dau src/opt/dsc src/opt/sfm src/opt/sbd src/opt/eslim \
 	src/sat/bsat src/sat/xsat src/sat/satoko src/sat/csat src/sat/msat src/sat/psat src/sat/cnf src/sat/bmc src/sat/glucose src/sat/glucose2 src/sat/kissat src/sat/cadical \
@@ -57,7 +58,10 @@ ARCHFLAGS := $(ARCHFLAGS)
 
 OPTFLAGS  ?= -O
 
-CFLAGS    += -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
+# cuCollection
+CUDA_INCLUDE_FLAGS = -Ilib/extern/cuCollections/include
+
+CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
 LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses
 ifneq ($(findstring arm,$(shell uname -m)),)
 	CFLAGS += -DABC_MEMALIGN=4
@@ -153,7 +157,7 @@ ifdef ABC_USE_LIBSTDCXX
 endif
 
 $(info $(MSG_PREFIX)Using CFLAGS=$(CFLAGS))
-CXXFLAGS += $(CFLAGS) -std=c++17 -fno-exceptions
+CXXFLAGS += $(CFLAGS) $(CUDA_INCLUDE_FLAGS) -std=c++17 -fno-exceptions
 
 SRC  :=
 GARBAGE := core core.* *.stackdump ./tags $(PROG) arch_flags
@@ -224,15 +228,15 @@ tags:
 
 $(PROG): $(OBJ)
 	@echo "$(MSG_PREFIX)\`\` Building binary:" $(notdir $@)
-	$(VERBOSE)$(LD) -o $@ $^ $(LDFLAGS) $(LIBS) -pg
+	$(VERBOSE)$(LD) -o $@ $^ $(LDFLAGS) $(LIBS) -pg -g
 
 lib$(PROG).a: $(LIBOBJ)
 	@echo "$(MSG_PREFIX)\`\` Linking:" $(notdir $@)
-	$(VERBOSE)$(AR) rsv $@ $? -pg
+	$(VERBOSE)$(AR) rsv $@ $? -pg -g
 
 lib$(PROG).so: $(LIBOBJ)
 	@echo "$(MSG_PREFIX)\`\` Linking:" $(notdir $@)
-	$(VERBOSE)$(CXX) -shared -o $@ $^ $(LIBS) -pg
+	$(VERBOSE)$(NVCC) -shared -o $@ $^ $(LIBS) -pg -g
 
 docs:
 	@echo "$(MSG_PREFIX)\`\` Building documentation." $(notdir $@)

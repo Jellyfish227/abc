@@ -16,6 +16,9 @@
 
 ***********************************************************************/
 #include "Fxch.h"
+#include "../fxchcuda/FxchCuda.h"
+
+#define USINGGPU 1 // if you want to use the old implementation, ***
 
 ABC_NAMESPACE_IMPL_START
 
@@ -34,15 +37,15 @@ static inline int Fxch_ManSCAddRemove( Fxch_Man_t* pFxchMan,
 
     if ( fAdd )
     {
-        ret = Fxch_SCHashTableInsert( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+        ret = FxchCuda_SCHashTableInsert( pFxchMan->pSCHashTable, pFxchMan->vCubes,
                                       SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate );
+                                      iCube, iLit0, iLit1, fUpdate, USINGGPU );
     }
     else
     {
-        ret = Fxch_SCHashTableRemove( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+        ret = FxchCuda_SCHashTableRemove( pFxchMan->pSCHashTable, pFxchMan->vCubes,
                                       SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate );
+                                      iCube, iLit0, iLit1, fUpdate, USINGGPU );
     }
 
     return ret;
@@ -277,12 +280,12 @@ void Fxch_ManSCHashTablesInit( Fxch_Man_t* pFxchMan )
         nTotalHashed += nSubCubes + 1;
     }
 
-    pFxchMan->pSCHashTable = Fxch_SCHashTableCreate( pFxchMan, nTotalHashed );
+    pFxchMan->pSCHashTable = FxchCuda_SCHashTableCreate( pFxchMan, nTotalHashed, USINGGPU );
 }
 
 void Fxch_ManSCHashTablesFree( Fxch_Man_t* pFxchMan )
 {
-    Fxch_SCHashTableDelete( pFxchMan->pSCHashTable );
+    FxchCuda_SCHashTableDelete( pFxchMan->pSCHashTable, USINGGPU);
 }
 
 void Fxch_ManDivCreate( Fxch_Man_t* pFxchMan )
