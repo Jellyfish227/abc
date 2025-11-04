@@ -5,6 +5,12 @@ AR   := ar
 NVCC := nvcc
 LD   := $(CXX)
 
+CUDA_ARCH ?= sm_52
+CUDA_BIN_PATH := $(shell which $(NVCC) 2>/dev/null)
+ifdef CUDA_BIN_PATH
+CUDA_HOME ?= $(dir $(dir $(CUDA_BIN_PATH)))
+endif
+
 MSG_PREFIX ?=
 ABCSRC ?= .
 VPATH = $(ABCSRC)
@@ -46,6 +52,11 @@ $(ARCHFLAGS_EXE) : arch_flags.c
 	$(CC) $< -o $(ARCHFLAGS_EXE)
 
 INCLUDES += -I$(ABCSRC)/src
+ifdef CUDA_HOME
+INCLUDES += -I$(CUDA_HOME)/include
+LIBS += -L$(CUDA_HOME)/lib64
+LIBS += -L$(CUDA_HOME)/lib
+endif
 
 # Use C99 stdint.h header for platform-dependent types
 ifdef ABC_USE_STDINT_H
@@ -142,6 +153,7 @@ endif
 endif
 
 # LIBS := -ldl -lrt
+LIBS += -lcudart
 LIBS += -lm
 ifneq ($(OS), $(filter $(OS), FreeBSD OpenBSD NetBSD))
   LIBS += -ldl
@@ -170,6 +182,7 @@ OBJ := \
 	$(patsubst %.cc, %.o, $(filter %.cc, $(SRC))) \
 	$(patsubst %.cpp, %.o, $(filter %.cpp, $(SRC))) \
 	$(patsubst %.c, %.o,  $(filter %.c, $(SRC)))  \
+	$(patsubst %.cu, %.o, $(filter %.cu, $(SRC))) \
 	$(patsubst %.y, %.o,  $(filter %.y, $(SRC)))
 
 LIBOBJ := $(filter-out src/base/main/main.o,$(OBJ))
@@ -192,6 +205,11 @@ DEP := $(OBJ:.o=.d)
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Compiling:" $(LOCAL_PATH)/$<
 	$(VERBOSE)$(CXX) -c $(OPTFLAGS) $(INCLUDES) $(CXXFLAGS) $< -o $@
+
+%.o: %.cu
+	@mkdir -p $(dir $@)
+	@echo "$(MSG_PREFIX)`` Compiling:" $(LOCAL_PATH)/$<
+	$(VERBOSE)$(NVCC) -c $(OPTFLAGS) $(INCLUDES) $(CXXFLAGS) -arch=$(CUDA_ARCH) $< -o $@
 
 %.d: %.c
 	@mkdir -p $(dir $@)
