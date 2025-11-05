@@ -122,12 +122,12 @@ void FxchCuda_ManDivDoubleCube( Fxch_Man_t* pFxchMan, int fAdd, int fUpdate )
     }
     
     // Step 3: GPU batch insert
-    FxchCuda_InsertSubcubesBatch(d_table, h_subcubeIds, h_cubeIndices,
+    FxchCuda_SCHashTableInsert(d_table, h_subcubeIds, h_cubeIndices,
                                   h_iLit0, h_iLit1, totalSubcubes);
     
     // Step 4: GPU batch compare
     int* d_matching_pairs;
-    int numMatches = FxchCuda_CompareSubcubesBatch(
+    int numMatches = FxchCuda_SCHashTableCompare(
         d_table, h_subcubeIds, h_cubeIndices, h_iLit0, h_iLit1,
         totalSubcubes, &d_matching_pairs);
     
@@ -142,8 +142,6 @@ void FxchCuda_ManDivDoubleCube( Fxch_Man_t* pFxchMan, int fAdd, int fUpdate )
     }
     
     // Cleanup
-    ABC_FREE(flatData);
-    ABC_FREE(levelSizes);
     ABC_FREE(h_subcubeIds);
     ABC_FREE(h_cubeIndices);
     ABC_FREE(h_iLit0);
