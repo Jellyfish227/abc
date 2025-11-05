@@ -84,6 +84,9 @@ struct Fxch_SCHashTable_t_
     /* Temporary data */
     Vec_Int_t    vSubCube0;
     Vec_Int_t    vSubCube1;
+
+    void* d_gpu_table;
+    short int usingGpu;
 };
 
 struct Fxch_Man_t_

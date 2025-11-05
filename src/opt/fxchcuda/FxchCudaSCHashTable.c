@@ -1,3 +1,16 @@
+/*
+
+
+    ASSUME DEPRECATED
+
+
+*/
+
+
+
+
+
+
 /**CFile****************************************************************
 
   FileName    [ FxchCudaSCHashTable.c ]
@@ -29,47 +42,36 @@ ABC_NAMESPACE_IMPL_START
 
 // These are all wrappers with fallbacks to the original fxch implementation
 
-Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu )
+Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate(
+    Fxch_Man_t* pFxchMan, 
+    int nEntries, 
+    short int usingGpu)
 {
-    // Early exit
     if (!usingGpu) {
         return Fxch_SCHashTableCreate(pFxchMan, nEntries);
     }
     
-    Vec_Wec_t* tbsCubes = pFxchMan->vCubes; // To Be Serialzied Cubes
-
-    int totalElements = Vec_WecSizeSize(tbsCubes);
-    int numCubes = Vec_WecSize(tbsCubes);
-
-    /*  
-        For Jellyfish: 
-        Today I learned that I can create arrays on the heap with malloc, 
-        I've never done this before so make sure this is right before proceeding
-    */
-
-    int* flatData = ABC_ALLOC(int, totalElements); // array that stores every literal
-    int* levelSizes = ABC_ALLOC(int, numCubes); // array that stores number of literals for each cube
-
-    int offset = 0;
-    Vec_Int_t* vLevel;
-    int i;
+    // GPU path: Just allocate empty structure
+    Fxch_SCHashTable_t* pSCHashTable = ABC_CALLOC(Fxch_SCHashTable_t, 1);
+    pSCHashTable->pFxchMan = pFxchMan;
+    pSCHashTable->nEntries = nEntries;
+    pSCHashTable->usingGpu = 1;
     
-    Vec_WecForEachLevel(tbsCubes, vLevel, i) {
-        int levelSize = Vec_IntSize(vLevel);
-        levelSizes[i] = levelSize;
-        memcpy(flatData + offset, Vec_IntArray(vLevel), levelSize * sizeof(int)); // copies each cube into the flat array 
-        offset += levelSize;
-    }
-
-    // Call GPU function (defined in .cu file)
-    Fxch_SCHashTable_t* result = FxchCuda_TransferAndAllocateGPU(
-        flatData, levelSizes, totalElements, numCubes, nEntries
+    // Allocate GPU structure (but don't transfer data yet!)
+    Fxch_SCHashTable_GPU_t* d_table = ABC_CALLOC(Fxch_SCHashTable_GPU_t, 1);
+    d_table->nEntries = nEntries;
+    
+    // Initialize hash table
+    size_t estimatedCapacity = (size_t)(nEntries / 0.7 * 1.2);
+    d_table->d_subcubeMap = new cuco::static_multimap<uint32_t, Fxch_SubCube_t>(
+        estimatedCapacity,
+        cuco::empty_key<uint32_t>{UINT32_MAX},
+        cuco::empty_value<Fxch_SubCube_t>{{UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX}}
     );
     
-    // I will free it, we are not developing escape from tarkov :)
-    free(flatData);
-    free(levelSizes);
-    return result;
+    pSCHashTable->d_gpu_table = (void*)d_table;
+    
+    return pSCHashTable;
 }
 
 
@@ -80,30 +82,27 @@ void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable, short int usi
         Fxch_SCHashTableDelete(pSCHashTable);
         return;
     }
+
+    // GPU cleanup
+    Fxch_SCHashTable_GPU_t* d_table = (Fxch_SCHashTable_GPU_t*)pSCHashTable->d_gpu_table;
+    FxchCuda_SCHashTableDeleteGPU(d_table);
+    free(pSCHashTable);
+
 }
 
-int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
-                            Vec_Wec_t* vCubes,
-                            uint32_t SubCubeID,
-                            uint32_t iCube,
-                            uint32_t iLit0,
-                            uint32_t iLit1,
-                            char fUpdate,
-                            short int usingGpu )
-{
-    // Early exit
-    if (!usingGpu) {
-        return Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
-    }
-}
+// int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
+//                             Vec_Wec_t* vCubes,
+//                             char fUpdate,
+//                             short int usingGpu )
+// {
+
+
+
+// }
 
 
 int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
                             Vec_Wec_t* vCubes,
-                            uint32_t SubCubeID,
-                            uint32_t iCube,
-                            uint32_t iLit0,
-                            uint32_t iLit1,
                             char fUpdate,
                             short int usingGpu )
 {
@@ -112,6 +111,10 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
         return Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
     }
 
+    Fxch_SCHashTable_GPU_t* d_table = 
+        (Fxch_SCHashTable_GPU_t*)pSCHashTable->d_gpu_table;
+    FxchCuda_SCHashTableRemoveGPU(d_table, SubCubeID, iCube, iLit0, iLit1);
+    return 1;
 }
 
 
@@ -121,6 +124,10 @@ unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, short i
     if (!usingGpu) {
         return Fxch_SCHashTableMemory(pHashTable);
     }
+        
+    Fxch_SCHashTable_GPU_t* d_table = 
+        (Fxch_SCHashTable_GPU_t*)pHashTable->d_gpu_table;
+    return FxchCuda_SCHashTableMemoryGPU(d_table);
 }
 
 
@@ -131,6 +138,10 @@ void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable, short int usingG
         Fxch_SCHashTablePrint(pHashTable);
         return;
     }
+     
+    Fxch_SCHashTable_GPU_t* d_table = 
+        (Fxch_SCHashTable_GPU_t*)pHashTable->d_gpu_table;
+    FxchCuda_SCHashTablePrintGPU(d_table);
 };
 
 ////////////////////////////////////////////////////////////////////////

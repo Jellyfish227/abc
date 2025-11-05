@@ -37,15 +37,15 @@ static inline int Fxch_ManSCAddRemove( Fxch_Man_t* pFxchMan,
 
     if ( fAdd )
     {
-        ret = FxchCuda_SCHashTableInsert( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+        ret = Fxch_SCHashTableInsert( pFxchMan->pSCHashTable, pFxchMan->vCubes,
                                       SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate, USINGGPU );
+                                      iCube, iLit0, iLit1, fUpdate );
     }
     else
     {
-        ret = FxchCuda_SCHashTableRemove( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+        ret = Fxch_SCHashTableRemove( pFxchMan->pSCHashTable, pFxchMan->vCubes,
                                       SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate, USINGGPU );
+                                      iCube, iLit0, iLit1, fUpdate );
     }
 
     return ret;
@@ -285,9 +285,10 @@ void Fxch_ManSCHashTablesInit( Fxch_Man_t* pFxchMan )
 
 void Fxch_ManSCHashTablesFree( Fxch_Man_t* pFxchMan )
 {
-    FxchCuda_SCHashTableDelete( pFxchMan->pSCHashTable, USINGGPU);
+    Fxch_SCHashTableDelete( pFxchMan->pSCHashTable);
 }
 
+// This function is only called once upon initial entry
 void Fxch_ManDivCreate( Fxch_Man_t* pFxchMan )
 {
     Vec_Int_t* vCube;
@@ -296,11 +297,21 @@ void Fxch_ManDivCreate( Fxch_Man_t* pFxchMan )
         fUpdate = 0,
         iCube;
 
-    Vec_WecForEachLevel( pFxchMan->vCubes, vCube, iCube )
-    {
-        Fxch_ManDivSingleCube( pFxchMan, iCube, fAdd, fUpdate );
-        Fxch_ManDivDoubleCube( pFxchMan, iCube, fAdd, fUpdate );
+    if (USINGGPU == 1) {
+        Vec_WecForEachLevel( pFxchMan->vCubes, vCube, iCube )
+        {
+            Fxch_ManDivSingleCube( pFxchMan, iCube, fAdd, fUpdate );
+        }
+        FxchCuda_ManDivDoubleCube( pFxchMan , fAdd, fUpdate ); // I need all the available cubes
+        FxchCuda_PopulateCPUHashTable( pFxchMan ); // convert GPU hashtable back to CPU
+    } else {
+        Vec_WecForEachLevel( pFxchMan->vCubes, vCube, iCube )
+        {
+            Fxch_ManDivSingleCube( pFxchMan, iCube, fAdd, fUpdate );
+            Fxch_ManDivDoubleCube( pFxchMan, iCube, fAdd, fUpdate );
+        }
     }
+
 
     pFxchMan->vDivPrio = Vec_QueAlloc( Vec_FltSize( pFxchMan->vDivWeights ) );
     Vec_QueSetPriority( pFxchMan->vDivPrio, Vec_FltArrayP( pFxchMan->vDivWeights ) );

@@ -194,13 +194,13 @@ int Fxch_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
     MurmurHash3_x86_32( ( void* ) &SubCubeID, sizeof( int ), 0x9747b28c, &BinID);
     pBin = Fxch_SCHashTableBin( pSCHashTable, BinID );
 
-    if ( pBin->vSCData == NULL )
+    if ( pBin->vSCData == NULL ) // if the bin is empty
     {
         pBin->vSCData = ABC_CALLOC( Fxch_SubCube_t, 16 );
         pBin->Size = 0;
         pBin->Cap = 16;
     }
-    else if ( pBin->Size == pBin->Cap )
+    else if ( pBin->Size == pBin->Cap ) // if the bin is too small
     {
         assert(pBin->Cap <= 0xAAAA);
         pBin->Cap = ( pBin->Cap >> 1 ) * 3;
