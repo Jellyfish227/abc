@@ -216,8 +216,7 @@ DEP := $(OBJ:.o=.d)
 %.o: %.cu
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Compiling CUDA:" $(LOCAL_PATH)/$<
-	$(VERBOSE)$(NVCC) -c -O3 -arch=sm_60 $(INCLUDES) -Xcompiler -fPIC $< -o $@
-
+	$(VERBOSE)$(NVCC) -c -O3 -arch=sm_60 $(INCLUDES) -ccbin $(CXX) -allow-unsupported-compiler -Xcompiler -fPIC $< -o $@
 %.d: %.c
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Generating dependency:" $(LOCAL_PATH)/$<

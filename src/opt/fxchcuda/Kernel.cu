@@ -111,7 +111,7 @@ __global__ void ParallelEntryCompareKernel(
     
     if (idx >= nBinSize)
         return;
-    
+
     // Initialize result
     pResults[idx].match = 0;
     pResults[idx].shouldContinue = 0;
@@ -296,29 +296,59 @@ int LaunchParallelEntryCompare(
     size_t cubeOffsetsSize = nMaxCube * sizeof(int);
     size_t cubeSizesSize = nMaxCube * sizeof(int);
     size_t outputIDSize = nMaxCube * nSizeOutputID * sizeof(int);
-    
+
+    CUDA_CHECK(cudaHostRegister(pNewEntry,	newEntrySize,		cudaHostRegisterPortable));
+    CUDA_CHECK(cudaHostRegister(pBinEntries,	binEntriesSize,		cudaHostRegisterPortable));
+    CUDA_CHECK(cudaHostRegister(pCubeData,	cubeDataSize,		cudaHostRegisterPortable));
+    CUDA_CHECK(cudaHostRegister(pCubeOffsets,	cubeOffsetsSize,	cudaHostRegisterPortable));
+    CUDA_CHECK(cudaHostRegister(pCubeSizes,	cubeSizesSize,		cudaHostRegisterPortable));
+    CUDA_CHECK(cudaHostRegister(pOutputID,	outputIDSize,		cudaHostRegisterPortable));
+    CUDA_CHECK(cudaHostRegister(pResults,	resultsSize,		cudaHostRegisterPortable));
+
+    // Create Cuda Stream for parallel processing
+    cudaStream_t s1,s2,s3,s4,s5,s6,s7;
+    cudaStreamCreate(&s1);
+    cudaStreamCreate(&s2);
+    cudaStreamCreate(&s3);
+    cudaStreamCreate(&s4);
+    cudaStreamCreate(&s5);
+    cudaStreamCreate(&s6);
+    cudaStreamCreate(&s7);
+
+    // Complete event
+    cudaEvent_t done[6];
+    for (int i = 0; i < 6; ++i) {
+        cudaEventCreate(&done[i]);
+        cudaStream_t s = (i==0?s1:i==1?s2:i==2?s3:i==3?s4:i==4?s5:s6);
+        cudaEventRecord(done[i],s);
+    }
+    // Wait on other complete
+    for (int i=0;i < 6;++i)
+        cudaStreamWaitEvent(s7, done[i], 0);
+
     // Allocate device memory
-    CUDA_CHECK(cudaMalloc(&d_newEntry, newEntrySize));
-    CUDA_CHECK(cudaMalloc(&d_binEntries, binEntriesSize));
-    CUDA_CHECK(cudaMalloc(&d_cubeData, cubeDataSize));
-    CUDA_CHECK(cudaMalloc(&d_cubeOffsets, cubeOffsetsSize));
-    CUDA_CHECK(cudaMalloc(&d_cubeSizes, cubeSizesSize));
-    CUDA_CHECK(cudaMalloc(&d_outputID, outputIDSize));
-    CUDA_CHECK(cudaMalloc(&d_results, resultsSize));
+    CUDA_CHECK(cudaMallocAsync(&d_newEntry, 	newEntrySize, 		s1));
+    CUDA_CHECK(cudaMallocAsync(&d_binEntries, 	binEntriesSize, 	s2));
+    CUDA_CHECK(cudaMallocAsync(&d_cubeData, 	cubeDataSize, 		s3));
+    CUDA_CHECK(cudaMallocAsync(&d_cubeOffsets, 	cubeOffsetsSize, 	s4));
+    CUDA_CHECK(cudaMallocAsync(&d_cubeSizes, 	cubeSizesSize, 		s5));
+    CUDA_CHECK(cudaMallocAsync(&d_outputID, 	outputIDSize, 		s6));
+    CUDA_CHECK(cudaMallocAsync(&d_results, 	resultsSize, 		s7));
     
     // Copy data to device
-    CUDA_CHECK(cudaMemcpy(d_newEntry, pNewEntry, newEntrySize, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_binEntries, pBinEntries, binEntriesSize, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_cubeData, pCubeData, cubeDataSize, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_cubeOffsets, pCubeOffsets, cubeOffsetsSize, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_cubeSizes, pCubeSizes, cubeSizesSize, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_outputID, pOutputID, outputIDSize, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpyAsync(d_newEntry, 	pNewEntry, 	newEntrySize, 		cudaMemcpyHostToDevice,	s1));
+    CUDA_CHECK(cudaMemcpyAsync(d_binEntries, 	pBinEntries, 	binEntriesSize, 	cudaMemcpyHostToDevice,	s2));
+    CUDA_CHECK(cudaMemcpyAsync(d_cubeData, 	pCubeData, 	cubeDataSize, 		cudaMemcpyHostToDevice,	s3));
+    CUDA_CHECK(cudaMemcpyAsync(d_cubeOffsets, 	pCubeOffsets, 	cubeOffsetsSize, 	cudaMemcpyHostToDevice,	s4));
+    CUDA_CHECK(cudaMemcpyAsync(d_cubeSizes, 	pCubeSizes, 	cubeSizesSize, 		cudaMemcpyHostToDevice,	s5));
+    CUDA_CHECK(cudaMemcpyAsync(d_outputID, 	pOutputID, 	outputIDSize, 		cudaMemcpyHostToDevice,	s6));
     
     // Launch kernel
     int threadsPerBlock = 256;
     int blocks = (nBinSize + threadsPerBlock - 1) / threadsPerBlock;
     
-    ParallelEntryCompareKernel<<<blocks, threadsPerBlock>>>(
+    
+    ParallelEntryCompareKernel<<<blocks, threadsPerBlock, 0, s7>>>(
         d_newEntry,
         d_binEntries,
         nBinSize,
@@ -335,8 +365,25 @@ int LaunchParallelEntryCompare(
     CUDA_CHECK(cudaDeviceSynchronize());
     
     // Copy results back
-    CUDA_CHECK(cudaMemcpy(pResults, d_results, resultsSize, cudaMemcpyDeviceToHost));
-    
+    CUDA_CHECK(cudaMemcpyAsync(pResults, d_results, resultsSize, cudaMemcpyDeviceToHost, s7));
+
+    // Sync stream and destroy them after finish async task
+    cudaStreamSynchronize(s1);
+    cudaStreamSynchronize(s2);
+    cudaStreamSynchronize(s3);
+    cudaStreamSynchronize(s4);
+    cudaStreamSynchronize(s5);
+    cudaStreamSynchronize(s6);
+    cudaStreamSynchronize(s7);
+    cudaStreamDestroy(s1);
+    cudaStreamDestroy(s2);
+    cudaStreamDestroy(s3);
+    cudaStreamDestroy(s4);
+    cudaStreamDestroy(s5);
+    cudaStreamDestroy(s6);
+    cudaStreamDestroy(s7);
+    for (int i=0;i<6;++i) cudaEventDestroy(done[i]);
+
     // Free device memory
     cudaFree(d_newEntry);
     cudaFree(d_binEntries);
@@ -345,7 +392,16 @@ int LaunchParallelEntryCompare(
     cudaFree(d_cubeSizes);
     cudaFree(d_outputID);
     cudaFree(d_results);
-    
+
+    // Unregister pinned memory
+    cudaHostUnregister(pNewEntry);
+    cudaHostUnregister(pBinEntries);
+    cudaHostUnregister(pCubeData);
+    cudaHostUnregister(pCubeOffsets);
+    cudaHostUnregister(pCubeSizes);
+    cudaHostUnregister(pOutputID);
+    cudaHostUnregister(pResults);
+
     return 0;
 }
 
