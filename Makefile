@@ -61,10 +61,8 @@ OPTFLAGS  ?= -O
 # cuCollection
 CUDA_INCLUDE_FLAGS = -Ilib/extern/cuCollections/include
 
-INCLUDES += -I/opt1/cuda/cuda-12.1/include
-
 CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
-LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses -lcudart -L/opt1/cuda/cuda-12.1/lib64
+LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses
 ifneq ($(findstring arm,$(shell uname -m)),)
 	CFLAGS += -DABC_MEMALIGN=4
 endif
@@ -164,7 +162,6 @@ ifneq ($(CUDA_SRC),)
   $(info $(MSG_PREFIX)Linking with CUDA runtime)
 endif
 
-
 ifdef ABC_USE_LIBSTDCXX
    LIBS += -lstdc++
    $(info $(MSG_PREFIX)Using explicit -lstdc++)
@@ -213,10 +210,13 @@ DEP := $(OBJ:.o=.d)
 	$(VERBOSE)$(CXX) -c $(OPTFLAGS) $(INCLUDES) $(CXXFLAGS) $< -o $@
 
 # CUDA compilation rule
+# Use GCC-12 for CUDA compatibility (CUDA 12.1 doesn't support GCC 13+)
+# On HPC clusters: use 'module load gcc/12' before building
 %.o: %.cu
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Compiling CUDA:" $(LOCAL_PATH)/$<
-	$(VERBOSE)$(NVCC) -c -O3 -arch=sm_60 $(INCLUDES) -ccbin $(CXX) -allow-unsupported-compiler -Xcompiler -fPIC $< -o $@
+	$(VERBOSE)$(NVCC) -c -O3 -arch=sm_60 $(INCLUDES) -ccbin $(CXX) -Xcompiler -fPIC $< -o $@
+
 %.d: %.c
 	@mkdir -p $(dir $@)
 	@echo "$(MSG_PREFIX)\`\` Generating dependency:" $(LOCAL_PATH)/$<
@@ -243,7 +243,7 @@ depend: $(DEP)
 clean:
 	@echo "$(MSG_PREFIX)\`\` Cleaning up..."
 	$(VERBOSE)rm -rvf $(PROG) lib$(PROG).a
-	$(VERBOSE)rm -rvf $(OBJ)
+	$(VERBOSE)rm -rvf $(OBJ) $(CUDA_OBJ)
 	$(VERBOSE)rm -rvf $(GARBAGE)
 	$(VERBOSE)rm -rvf $(OBJ:.o=.d)
 

@@ -4,15 +4,15 @@
 
   PackageName [ Fast eXtract with GPU Accelerated Cube Hashing (FXCHCUDA) ]
 
-  Synopsis    [ CUDA kernels for parallelized entry comparison ]
+  Synopsis    [ CUDA kernels for parallelized entry comparison - ASYNC VERSION ]
 
   Author      [ AI Assistant ]
 
   Affiliation [ CUHK ]
 
-  Date        [ Ver. 1.0. Started - November 4, 2025. ]
+  Date        [ Ver. 2.0. Started - November 2025. ]
 
-  Revision    []
+  Revision    [ Async execution with streams and persistent memory ]
 
 ***********************************************************************/
 
@@ -20,16 +20,31 @@
 #include <stdio.h>
 #include <stdint.h>
 
-// CUDA error checking macro
-#define CUDA_CHECK(call) \
-    do { \
-        cudaError_t err = call; \
-        if (err != cudaSuccess) { \
-            fprintf(stderr, "CUDA error in %s:%d: %s\n", __FILE__, __LINE__, \
-                    cudaGetErrorString(err)); \
-            return -1; \
-        } \
-    } while(0)
+////////////////////////////////////////////////////////////////////////
+///                     PERSISTENT GPU MEMORY                        ///
+////////////////////////////////////////////////////////////////////////
+
+// Persistent GPU memory pool to avoid repeated allocation
+typedef struct {
+    // Device pointers
+    int* d_cubeData;
+    int* d_cubeOffsets;
+    int* d_cubeSizes;
+    int* d_outputID;
+    
+    // Allocated sizes
+    size_t cubeDataCapacity;
+    size_t cubeMetaCapacity;
+    size_t outputIDCapacity;
+    
+    // CUDA stream for async operations
+    cudaStream_t stream;
+    
+    // Validity flag
+    int initialized;
+} GPUMemoryPool_t;
+
+static GPUMemoryPool_t g_gpuPool = {NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0};
 
 // Device-side subcube data structure
 typedef struct {
@@ -39,31 +54,74 @@ typedef struct {
     uint32_t iLit1 : 16;
 } DevSubCube_t;
 
-// Device-side cube data - simplified representation
-typedef struct {
-    int* pData;      // Pointer to cube data
-    int  nSize;      // Size of the cube
-    int  nAlloc;     // Allocated size
-} DevCube_t;
-
 // Result structure for each comparison
 typedef struct {
-    int match;           // 1 if entries match, 0 otherwise
-    int shouldContinue;  // 1 if comparison should proceed, 0 if early exit
-    int cubeIndex;       // Index of the comparison
+    int match;
+    int shouldContinue;
+    int cubeIndex;
 } ComparisonResult_t;
+
+////////////////////////////////////////////////////////////////////////
+///                     HELPER FUNCTIONS                             ///
+////////////////////////////////////////////////////////////////////////
+
+/**Function*************************************************************
+
+  Synopsis    [ Initialize GPU memory pool ]
+
+***********************************************************************/
+static int InitGPUMemoryPool()
+{
+    if (g_gpuPool.initialized)
+        return 0;
+    
+    // Create CUDA stream for async operations
+    cudaError_t err = cudaStreamCreate(&g_gpuPool.stream);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to create CUDA stream: %s\n", cudaGetErrorString(err));
+        return -1;
+    }
+    
+    // Pre-allocate reasonable sizes (will grow if needed)
+    g_gpuPool.cubeDataCapacity = 10 * 1024 * 1024;  // 10M ints = 40MB
+    g_gpuPool.cubeMetaCapacity = 100000;             // 100K cubes
+    g_gpuPool.outputIDCapacity = 100000 * 32;        // 100K cubes * 32 ints
+    
+    g_gpuPool.initialized = 1;
+    return 0;
+}
+
+/**Function*************************************************************
+
+  Synopsis    [ Free GPU memory pool ]
+
+***********************************************************************/
+static void FreeGPUMemoryPool()
+{
+    if (!g_gpuPool.initialized)
+        return;
+    
+    if (g_gpuPool.d_cubeData) cudaFree(g_gpuPool.d_cubeData);
+    if (g_gpuPool.d_cubeOffsets) cudaFree(g_gpuPool.d_cubeOffsets);
+    if (g_gpuPool.d_cubeSizes) cudaFree(g_gpuPool.d_cubeSizes);
+    if (g_gpuPool.d_outputID) cudaFree(g_gpuPool.d_outputID);
+    if (g_gpuPool.stream) cudaStreamDestroy(g_gpuPool.stream);
+    
+    g_gpuPool.d_cubeData = NULL;
+    g_gpuPool.d_cubeOffsets = NULL;
+    g_gpuPool.d_cubeSizes = NULL;
+    g_gpuPool.d_outputID = NULL;
+    g_gpuPool.stream = NULL;
+    g_gpuPool.cubeDataCapacity = 0;
+    g_gpuPool.cubeMetaCapacity = 0;
+    g_gpuPool.outputIDCapacity = 0;
+    g_gpuPool.initialized = 0;
+}
 
 ////////////////////////////////////////////////////////////////////////
 ///                     CUDA KERNEL FUNCTIONS                       ///
 ////////////////////////////////////////////////////////////////////////
 
-/**Function*************************************************************
-
-  Synopsis    [ Device function to compare two integer arrays ]
-
-  Description [ Returns 1 if arrays are equal, 0 otherwise ]
-
-***********************************************************************/
 __device__ int DeviceVecIntEqual(const int* arr1, int size1, const int* arr2, int size2)
 {
     if (size1 != size2)
@@ -76,25 +134,6 @@ __device__ int DeviceVecIntEqual(const int* arr1, int size1, const int* arr2, in
     return 1;
 }
 
-/**Function*************************************************************
-
-  Synopsis    [ CUDA kernel for parallel entry comparison ]
-
-  Description [ Each thread compares the new entry against one existing entry ]
-
-  Parameters:
-    - pNewEntry: The new entry to compare against
-    - pBinEntries: Array of existing entries in the bin
-    - nBinSize: Number of entries in the bin (excluding the new one)
-    - pCubeData: Flattened array of all cube data
-    - pCubeOffsets: Offset for each cube in pCubeData
-    - pCubeSizes: Size of each cube
-    - pOutputID: Output ID data for all cubes
-    - nSizeOutputID: Size of output ID per cube
-    - pResults: Output array of comparison results
-    - iNewEntry: Index of the new entry (typically nBinSize)
-
-***********************************************************************/
 __global__ void ParallelEntryCompareKernel(
     DevSubCube_t* pNewEntry,
     DevSubCube_t* pBinEntries,
@@ -111,29 +150,29 @@ __global__ void ParallelEntryCompareKernel(
     
     if (idx >= nBinSize)
         return;
-
-    // Initialize result
+    
     pResults[idx].match = 0;
     pResults[idx].shouldContinue = 0;
     pResults[idx].cubeIndex = idx;
     
     DevSubCube_t* pEntry = &pBinEntries[idx];
     
-    // Check iLit1 compatibility (early exit condition)
+    // Early exit conditions
     if ((pEntry->iLit1 != 0 && pNewEntry->iLit1 == 0) || 
         (pEntry->iLit1 == 0 && pNewEntry->iLit1 != 0))
         return;
     
-    // Get cube pointers and sizes
     int iCube0 = pEntry->iCube;
     int iCube1 = pNewEntry->iCube;
+    
+    if (iCube0 >= nSizeOutputID || iCube1 >= nSizeOutputID)
+        return;
     
     int* vCube0 = &pCubeData[pCubeOffsets[iCube0]];
     int* vCube1 = &pCubeData[pCubeOffsets[iCube1]];
     int nSize0 = pCubeSizes[iCube0];
     int nSize1 = pCubeSizes[iCube1];
     
-    // Early exit checks
     if (nSize0 == 0 || nSize1 == 0)
         return;
     
@@ -166,32 +205,27 @@ __global__ void ParallelEntryCompareKernel(
             return;
     }
     
-    // Build subcubes and compare
-    // Allocate temporary arrays in shared or local memory
-    int subCube0[256];  // Stack allocation - assumes max cube size
+    // Build subcubes (stack allocation)
+    int subCube0[256];
     int subCube1[256];
     int subSize0 = 0;
     int subSize1 = 0;
     
     // Build subCube0
     if (pEntry->iLit0 > 0) {
-        // AppendSkip
         for (int i = 0; i < nSize0; i++) {
             if (i != pEntry->iLit0)
                 subCube0[subSize0++] = vCube0[i];
         }
     } else {
-        // Append all
         for (int i = 0; i < nSize0; i++)
             subCube0[subSize0++] = vCube0[i];
     }
     
-    // Drop iLit1 if needed
     if (pEntry->iLit1 > 0) {
         int dropIdx = (pEntry->iLit0 < pEntry->iLit1) ? 
                       pEntry->iLit1 - 1 : pEntry->iLit1;
         if (dropIdx < subSize0) {
-            // Remove element at dropIdx
             for (int i = dropIdx; i < subSize0 - 1; i++)
                 subCube0[i] = subCube0[i + 1];
             subSize0--;
@@ -200,23 +234,19 @@ __global__ void ParallelEntryCompareKernel(
     
     // Build subCube1
     if (pNewEntry->iLit0 > 0) {
-        // AppendSkip
         for (int i = 0; i < nSize1; i++) {
             if (i != pNewEntry->iLit0)
                 subCube1[subSize1++] = vCube1[i];
         }
     } else {
-        // Append all
         for (int i = 0; i < nSize1; i++)
             subCube1[subSize1++] = vCube1[i];
     }
     
-    // Drop iLit1 if needed
     if (pNewEntry->iLit1 > 0) {
         int dropIdx = (pNewEntry->iLit0 < pNewEntry->iLit1) ? 
                       pNewEntry->iLit1 - 1 : pNewEntry->iLit1;
         if (dropIdx < subSize1) {
-            // Remove element at dropIdx
             for (int i = dropIdx; i < subSize1 - 1; i++)
                 subCube1[i] = subCube1[i + 1];
             subSize1--;
@@ -224,9 +254,7 @@ __global__ void ParallelEntryCompareKernel(
     }
     
     // Final comparison
-    int isEqual = DeviceVecIntEqual(subCube0, subSize0, subCube1, subSize1);
-    
-    if (isEqual) {
+    if (DeviceVecIntEqual(subCube0, subSize0, subCube1, subSize1)) {
         pResults[idx].match = 1;
         pResults[idx].shouldContinue = 1;
     }
@@ -240,23 +268,27 @@ extern "C" {
 
 /**Function*************************************************************
 
-  Synopsis    [ Host function to launch parallel entry comparison ]
+  Synopsis    [ Initialize CUDA system ]
 
-  Description [ Returns array of comparison results, or NULL on error ]
+***********************************************************************/
+int InitCUDASystem()
+{
+    return InitGPUMemoryPool();
+}
 
-  Parameters:
-    - pNewEntry: New subcube entry
-    - pBinEntries: Array of existing entries
-    - nBinSize: Number of existing entries
-    - pCubeData: Flattened cube data
-    - pCubeOffsets: Offsets for each cube
-    - pCubeSizes: Sizes for each cube
-    - nMaxCube: Maximum cube index
-    - pOutputID: Output ID array
-    - nSizeOutputID: Size of output ID per cube
-    - pResults: Output results array (must be pre-allocated)
+/**Function*************************************************************
 
-  Returns: 0 on success, -1 on failure
+  Synopsis    [ Cleanup CUDA system ]
+
+***********************************************************************/
+void CleanupCUDASystem()
+{
+    FreeGPUMemoryPool();
+}
+
+/**Function*************************************************************
+
+  Synopsis    [ Async entry comparison with persistent memory ]
 
 ***********************************************************************/
 int LaunchParallelEntryCompare(
@@ -274,20 +306,19 @@ int LaunchParallelEntryCompare(
     if (nBinSize == 0)
         return 0;
     
-    DevSubCube_t* d_newEntry;
-    DevSubCube_t* d_binEntries;
-    int* d_cubeData;
-    int* d_cubeOffsets;
-    int* d_cubeSizes;
-    int* d_outputID;
-    ComparisonResult_t* d_results;
+    // Initialize GPU pool if needed
+    if (!g_gpuPool.initialized) {
+        if (InitGPUMemoryPool() != 0)
+            return -1;
+    }
+    
+    cudaError_t err;
     
     // Calculate sizes
     size_t newEntrySize = sizeof(DevSubCube_t);
     size_t binEntriesSize = nBinSize * sizeof(DevSubCube_t);
     size_t resultsSize = nBinSize * sizeof(ComparisonResult_t);
     
-    // Calculate total cube data size
     int totalCubeData = 0;
     for (int i = 0; i < nMaxCube; i++)
         totalCubeData += pCubeSizes[i];
@@ -296,113 +327,130 @@ int LaunchParallelEntryCompare(
     size_t cubeOffsetsSize = nMaxCube * sizeof(int);
     size_t cubeSizesSize = nMaxCube * sizeof(int);
     size_t outputIDSize = nMaxCube * nSizeOutputID * sizeof(int);
-
-    CUDA_CHECK(cudaHostRegister(pNewEntry,	newEntrySize,		cudaHostRegisterPortable));
-    CUDA_CHECK(cudaHostRegister(pBinEntries,	binEntriesSize,		cudaHostRegisterPortable));
-    CUDA_CHECK(cudaHostRegister(pCubeData,	cubeDataSize,		cudaHostRegisterPortable));
-    CUDA_CHECK(cudaHostRegister(pCubeOffsets,	cubeOffsetsSize,	cudaHostRegisterPortable));
-    CUDA_CHECK(cudaHostRegister(pCubeSizes,	cubeSizesSize,		cudaHostRegisterPortable));
-    CUDA_CHECK(cudaHostRegister(pOutputID,	outputIDSize,		cudaHostRegisterPortable));
-    CUDA_CHECK(cudaHostRegister(pResults,	resultsSize,		cudaHostRegisterPortable));
-
-    // Create Cuda Stream for parallel processing
-    cudaStream_t s1,s2,s3,s4,s5,s6,s7;
-    cudaStreamCreate(&s1);
-    cudaStreamCreate(&s2);
-    cudaStreamCreate(&s3);
-    cudaStreamCreate(&s4);
-    cudaStreamCreate(&s5);
-    cudaStreamCreate(&s6);
-    cudaStreamCreate(&s7);
-
-    // Complete event
-    cudaEvent_t done[6];
-    for (int i = 0; i < 6; ++i) {
-        cudaEventCreate(&done[i]);
-        cudaStream_t s = (i==0?s1:i==1?s2:i==2?s3:i==3?s4:i==4?s5:s6);
-        cudaEventRecord(done[i],s);
+    
+    // Allocate or reuse persistent memory for cube data
+    if (cubeDataSize > g_gpuPool.cubeDataCapacity || !g_gpuPool.d_cubeData) {
+        if (g_gpuPool.d_cubeData) cudaFree(g_gpuPool.d_cubeData);
+        err = cudaMalloc(&g_gpuPool.d_cubeData, cubeDataSize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for cubeData: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+        g_gpuPool.cubeDataCapacity = cubeDataSize;
     }
-    // Wait on other complete
-    for (int i=0;i < 6;++i)
-        cudaStreamWaitEvent(s7, done[i], 0);
-
-    // Allocate device memory
-    CUDA_CHECK(cudaMallocAsync(&d_newEntry, 	newEntrySize, 		s1));
-    CUDA_CHECK(cudaMallocAsync(&d_binEntries, 	binEntriesSize, 	s2));
-    CUDA_CHECK(cudaMallocAsync(&d_cubeData, 	cubeDataSize, 		s3));
-    CUDA_CHECK(cudaMallocAsync(&d_cubeOffsets, 	cubeOffsetsSize, 	s4));
-    CUDA_CHECK(cudaMallocAsync(&d_cubeSizes, 	cubeSizesSize, 		s5));
-    CUDA_CHECK(cudaMallocAsync(&d_outputID, 	outputIDSize, 		s6));
-    CUDA_CHECK(cudaMallocAsync(&d_results, 	resultsSize, 		s7));
     
-    // Copy data to device
-    CUDA_CHECK(cudaMemcpyAsync(d_newEntry, 	pNewEntry, 	newEntrySize, 		cudaMemcpyHostToDevice,	s1));
-    CUDA_CHECK(cudaMemcpyAsync(d_binEntries, 	pBinEntries, 	binEntriesSize, 	cudaMemcpyHostToDevice,	s2));
-    CUDA_CHECK(cudaMemcpyAsync(d_cubeData, 	pCubeData, 	cubeDataSize, 		cudaMemcpyHostToDevice,	s3));
-    CUDA_CHECK(cudaMemcpyAsync(d_cubeOffsets, 	pCubeOffsets, 	cubeOffsetsSize, 	cudaMemcpyHostToDevice,	s4));
-    CUDA_CHECK(cudaMemcpyAsync(d_cubeSizes, 	pCubeSizes, 	cubeSizesSize, 		cudaMemcpyHostToDevice,	s5));
-    CUDA_CHECK(cudaMemcpyAsync(d_outputID, 	pOutputID, 	outputIDSize, 		cudaMemcpyHostToDevice,	s6));
+    if (cubeOffsetsSize > g_gpuPool.cubeMetaCapacity * sizeof(int) || !g_gpuPool.d_cubeOffsets) {
+        if (g_gpuPool.d_cubeOffsets) cudaFree(g_gpuPool.d_cubeOffsets);
+        if (g_gpuPool.d_cubeSizes) cudaFree(g_gpuPool.d_cubeSizes);
+        
+        err = cudaMalloc(&g_gpuPool.d_cubeOffsets, cubeOffsetsSize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for cubeOffsets: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+        err = cudaMalloc(&g_gpuPool.d_cubeSizes, cubeSizesSize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for cubeSizes: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+        g_gpuPool.cubeMetaCapacity = nMaxCube;
+    }
     
-    // Launch kernel
+    if (outputIDSize > g_gpuPool.outputIDCapacity || !g_gpuPool.d_outputID) {
+        if (g_gpuPool.d_outputID) cudaFree(g_gpuPool.d_outputID);
+        err = cudaMalloc(&g_gpuPool.d_outputID, outputIDSize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for outputID: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+        g_gpuPool.outputIDCapacity = outputIDSize;
+    }
+    
+    // Temporary allocations (per-call, but small)
+    DevSubCube_t* d_newEntry;
+    DevSubCube_t* d_binEntries;
+    ComparisonResult_t* d_results;
+    
+    err = cudaMalloc(&d_newEntry, newEntrySize);
+    if (err != cudaSuccess) goto cleanup_and_fail;
+    
+    err = cudaMalloc(&d_binEntries, binEntriesSize);
+    if (err != cudaSuccess) {
+        cudaFree(d_newEntry);
+        goto cleanup_and_fail;
+    }
+    
+    err = cudaMalloc(&d_results, resultsSize);
+    if (err != cudaSuccess) {
+        cudaFree(d_newEntry);
+        cudaFree(d_binEntries);
+        goto cleanup_and_fail;
+    }
+    
+    // Async copy to device using stream
+    cudaMemcpyAsync(d_newEntry, pNewEntry, newEntrySize, 
+                    cudaMemcpyHostToDevice, g_gpuPool.stream);
+    cudaMemcpyAsync(d_binEntries, pBinEntries, binEntriesSize, 
+                    cudaMemcpyHostToDevice, g_gpuPool.stream);
+    cudaMemcpyAsync(g_gpuPool.d_cubeData, pCubeData, cubeDataSize, 
+                    cudaMemcpyHostToDevice, g_gpuPool.stream);
+    cudaMemcpyAsync(g_gpuPool.d_cubeOffsets, pCubeOffsets, cubeOffsetsSize, 
+                    cudaMemcpyHostToDevice, g_gpuPool.stream);
+    cudaMemcpyAsync(g_gpuPool.d_cubeSizes, pCubeSizes, cubeSizesSize, 
+                    cudaMemcpyHostToDevice, g_gpuPool.stream);
+    cudaMemcpyAsync(g_gpuPool.d_outputID, pOutputID, outputIDSize, 
+                    cudaMemcpyHostToDevice, g_gpuPool.stream);
+    
+    // Launch kernel on stream (async)
     int threadsPerBlock = 256;
     int blocks = (nBinSize + threadsPerBlock - 1) / threadsPerBlock;
     
-    
-    ParallelEntryCompareKernel<<<blocks, threadsPerBlock, 0, s7>>>(
+    ParallelEntryCompareKernel<<<blocks, threadsPerBlock, 0, g_gpuPool.stream>>>(
         d_newEntry,
         d_binEntries,
         nBinSize,
-        d_cubeData,
-        d_cubeOffsets,
-        d_cubeSizes,
-        d_outputID,
+        g_gpuPool.d_cubeData,
+        g_gpuPool.d_cubeOffsets,
+        g_gpuPool.d_cubeSizes,
+        g_gpuPool.d_outputID,
         nSizeOutputID,
         d_results,
         nBinSize);
     
-    // Check for kernel errors
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
+    // Check for kernel launch errors
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(err));
+        cudaFree(d_newEntry);
+        cudaFree(d_binEntries);
+        cudaFree(d_results);
+        return -1;
+    }
     
-    // Copy results back
-    CUDA_CHECK(cudaMemcpyAsync(pResults, d_results, resultsSize, cudaMemcpyDeviceToHost, s7));
-
-    // Sync stream and destroy them after finish async task
-    cudaStreamSynchronize(s1);
-    cudaStreamSynchronize(s2);
-    cudaStreamSynchronize(s3);
-    cudaStreamSynchronize(s4);
-    cudaStreamSynchronize(s5);
-    cudaStreamSynchronize(s6);
-    cudaStreamSynchronize(s7);
-    cudaStreamDestroy(s1);
-    cudaStreamDestroy(s2);
-    cudaStreamDestroy(s3);
-    cudaStreamDestroy(s4);
-    cudaStreamDestroy(s5);
-    cudaStreamDestroy(s6);
-    cudaStreamDestroy(s7);
-    for (int i=0;i<6;++i) cudaEventDestroy(done[i]);
-
-    // Free device memory
+    // Async copy results back
+    cudaMemcpyAsync(pResults, d_results, resultsSize, 
+                    cudaMemcpyDeviceToHost, g_gpuPool.stream);
+    
+    // **KEY**: Only synchronize at the end
+    err = cudaStreamSynchronize(g_gpuPool.stream);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Stream sync failed: %s\n", cudaGetErrorString(err));
+        cudaFree(d_newEntry);
+        cudaFree(d_binEntries);
+        cudaFree(d_results);
+        return -1;
+    }
+    
+    // Free temporary allocations
     cudaFree(d_newEntry);
     cudaFree(d_binEntries);
-    cudaFree(d_cubeData);
-    cudaFree(d_cubeOffsets);
-    cudaFree(d_cubeSizes);
-    cudaFree(d_outputID);
     cudaFree(d_results);
-
-    // Unregister pinned memory
-    cudaHostUnregister(pNewEntry);
-    cudaHostUnregister(pBinEntries);
-    cudaHostUnregister(pCubeData);
-    cudaHostUnregister(pCubeOffsets);
-    cudaHostUnregister(pCubeSizes);
-    cudaHostUnregister(pOutputID);
-    cudaHostUnregister(pResults);
-
+    
     return 0;
+
+cleanup_and_fail:
+    fprintf(stderr, "CUDA allocation failed: %s\n", cudaGetErrorString(err));
+    return -1;
 }
 
 } // extern "C"
@@ -410,4 +458,3 @@ int LaunchParallelEntryCompare(
 ////////////////////////////////////////////////////////////////////////
 ///                       END OF FILE                                ///
 ////////////////////////////////////////////////////////////////////////
-

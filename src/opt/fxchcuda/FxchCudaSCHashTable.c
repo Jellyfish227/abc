@@ -56,6 +56,9 @@ static GPUDataCache_t g_GPUCache = {NULL, NULL, NULL, 0, 0, 0, 0};
 
 // External CUDA kernel interface
 // Note: extern "C" is in the Kernel.cu file
+int InitCUDASystem();
+void CleanupCUDASystem();
+
 int LaunchParallelEntryCompare(
     void* pNewEntry,
     void* pBinEntries,
@@ -228,17 +231,28 @@ static int PrepareCubeDataForGPU(
 
 Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu )
 {
-    // For now, always use original implementation
-    // GPU-specific initialization can be added here if needed
-    return Fxch_SCHashTableCreate(pFxchMan, nEntries);
+    Fxch_SCHashTable_t* pTable = Fxch_SCHashTableCreate(pFxchMan, nEntries);
+    
+    // Initialize CUDA system if using GPU
+    if (usingGpu && pTable != NULL) {
+        if (InitCUDASystem() != 0) {
+            printf("[CUDA] Warning: Failed to initialize CUDA system, will use CPU fallback\n");
+        } else {
+            printf("[CUDA] Initialized async execution system\n");
+        }
+    }
+    
+    return pTable;
 }
 
 
 void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable, short int usingGpu)
 {
-    // Clean up GPU cache
+    // Clean up GPU resources
     if (usingGpu) {
         FreeGPUDataCache();
+        CleanupCUDASystem();
+        printf("[CUDA] Cleaned up GPU resources\n");
     }
     
     // Call original delete function
@@ -326,7 +340,7 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
         (void*)pResults);
     
     if (cudaResult == 0) {
-        // Process results from GPU
+        // Process results from GPU successfully
         int iEntry;
         for (iEntry = 0; iEntry < (int)pBin->Size - 1; iEntry++) {
             if (!pResults[iEntry].match)
@@ -379,13 +393,14 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
         }
     } else {
         // CUDA failed, fall back to CPU version
-        printf("CUDA kernel failed, falling back to CPU\n");
+        printf("[CUDA] Kernel failed in Insert, falling back to CPU\n");
         ABC_FREE(pResults);
-        // Don't free cached data
         
         // Remove the entry we added and use original CPU version
         pBin->Size--;
         pSCHashTable->nEntries--;
+        
+        // Use CPU version (non-GPU call to avoid recursion)
         return Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
     }
     
@@ -509,9 +524,10 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
         }
     } else {
         // CUDA failed, fall back to CPU version
-        printf("CUDA kernel failed in Remove, falling back to CPU\n");
+        printf("[CUDA] Kernel failed in Remove, falling back to CPU\n");
         ABC_FREE(pResults);
-        // Don't free cached data
+        
+        // Use CPU version (non-GPU call to avoid recursion)
         return Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
     }
 
