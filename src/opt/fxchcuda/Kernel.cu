@@ -26,25 +26,37 @@
 
 // Persistent GPU memory pool to avoid repeated allocation
 typedef struct {
-    // Device pointers
+    // Device pointers for bulk data
     int* d_cubeData;
     int* d_cubeOffsets;
     int* d_cubeSizes;
     int* d_outputID;
     
-    // Allocated sizes
+    // Device pointers for per-call data (now persistent)
+    void* d_newEntry;
+    void* d_binEntries;
+    void* d_results;
+    
+    // Allocated sizes for bulk data
     size_t cubeDataCapacity;
     size_t cubeMetaCapacity;
     size_t outputIDCapacity;
     
-    // CUDA stream for async operations
+    // Allocated sizes for per-call data
+    size_t newEntryCapacity;
+    size_t binEntriesCapacity;
+    size_t resultsCapacity;
+    
+    // CUDA stream and events for async operations
     cudaStream_t stream;
+    cudaEvent_t transferComplete;
     
     // Validity flag
     int initialized;
 } GPUMemoryPool_t;
 
-static GPUMemoryPool_t g_gpuPool = {NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0};
+static GPUMemoryPool_t g_gpuPool = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, 
+                                     0, 0, 0, 0, 0, 0, NULL, NULL, 0};
 
 // Device-side subcube data structure
 typedef struct {
@@ -82,10 +94,23 @@ static int InitGPUMemoryPool()
         return -1;
     }
     
-    // Pre-allocate reasonable sizes (will grow if needed)
+    // Create CUDA event for transfer tracking
+    err = cudaEventCreate(&g_gpuPool.transferComplete);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to create CUDA event: %s\n", cudaGetErrorString(err));
+        cudaStreamDestroy(g_gpuPool.stream);
+        return -1;
+    }
+    
+    // Pre-allocate reasonable sizes for bulk data (will grow if needed)
     g_gpuPool.cubeDataCapacity = 10 * 1024 * 1024;  // 10M ints = 40MB
     g_gpuPool.cubeMetaCapacity = 100000;             // 100K cubes
     g_gpuPool.outputIDCapacity = 100000 * 32;        // 100K cubes * 32 ints
+    
+    // Initialize per-call data capacities (will allocate on first use)
+    g_gpuPool.newEntryCapacity = 0;
+    g_gpuPool.binEntriesCapacity = 0;
+    g_gpuPool.resultsCapacity = 0;
     
     g_gpuPool.initialized = 1;
     return 0;
@@ -101,20 +126,37 @@ static void FreeGPUMemoryPool()
     if (!g_gpuPool.initialized)
         return;
     
+    // Free bulk data
     if (g_gpuPool.d_cubeData) cudaFree(g_gpuPool.d_cubeData);
     if (g_gpuPool.d_cubeOffsets) cudaFree(g_gpuPool.d_cubeOffsets);
     if (g_gpuPool.d_cubeSizes) cudaFree(g_gpuPool.d_cubeSizes);
     if (g_gpuPool.d_outputID) cudaFree(g_gpuPool.d_outputID);
-    if (g_gpuPool.stream) cudaStreamDestroy(g_gpuPool.stream);
     
+    // Free per-call data
+    if (g_gpuPool.d_newEntry) cudaFree(g_gpuPool.d_newEntry);
+    if (g_gpuPool.d_binEntries) cudaFree(g_gpuPool.d_binEntries);
+    if (g_gpuPool.d_results) cudaFree(g_gpuPool.d_results);
+    
+    // Destroy stream and event
+    if (g_gpuPool.stream) cudaStreamDestroy(g_gpuPool.stream);
+    if (g_gpuPool.transferComplete) cudaEventDestroy(g_gpuPool.transferComplete);
+    
+    // Reset all pointers and capacities
     g_gpuPool.d_cubeData = NULL;
     g_gpuPool.d_cubeOffsets = NULL;
     g_gpuPool.d_cubeSizes = NULL;
     g_gpuPool.d_outputID = NULL;
+    g_gpuPool.d_newEntry = NULL;
+    g_gpuPool.d_binEntries = NULL;
+    g_gpuPool.d_results = NULL;
     g_gpuPool.stream = NULL;
+    g_gpuPool.transferComplete = NULL;
     g_gpuPool.cubeDataCapacity = 0;
     g_gpuPool.cubeMetaCapacity = 0;
     g_gpuPool.outputIDCapacity = 0;
+    g_gpuPool.newEntryCapacity = 0;
+    g_gpuPool.binEntriesCapacity = 0;
+    g_gpuPool.resultsCapacity = 0;
     g_gpuPool.initialized = 0;
 }
 
@@ -301,7 +343,8 @@ int LaunchParallelEntryCompare(
     int nMaxCube,
     int* pOutputID,
     int nSizeOutputID,
-    void* pResults)
+    void* pResults,
+    int bSkipCubeTransfer)
 {
     if (nBinSize == 0)
         return 0;
@@ -366,40 +409,59 @@ int LaunchParallelEntryCompare(
         g_gpuPool.outputIDCapacity = outputIDSize;
     }
     
-    // Temporary allocations (per-call, but small)
-    DevSubCube_t* d_newEntry;
-    DevSubCube_t* d_binEntries;
-    ComparisonResult_t* d_results;
-    
-    err = cudaMalloc(&d_newEntry, newEntrySize);
-    if (err != cudaSuccess) goto cleanup_and_fail;
-    
-    err = cudaMalloc(&d_binEntries, binEntriesSize);
-    if (err != cudaSuccess) {
-        cudaFree(d_newEntry);
-        goto cleanup_and_fail;
+    // Allocate or reuse persistent memory for per-call data
+    if (newEntrySize > g_gpuPool.newEntryCapacity || !g_gpuPool.d_newEntry) {
+        if (g_gpuPool.d_newEntry) cudaFree(g_gpuPool.d_newEntry);
+        err = cudaMalloc(&g_gpuPool.d_newEntry, newEntrySize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for newEntry: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+        g_gpuPool.newEntryCapacity = newEntrySize;
     }
     
-    err = cudaMalloc(&d_results, resultsSize);
-    if (err != cudaSuccess) {
-        cudaFree(d_newEntry);
-        cudaFree(d_binEntries);
-        goto cleanup_and_fail;
+    if (binEntriesSize > g_gpuPool.binEntriesCapacity || !g_gpuPool.d_binEntries) {
+        if (g_gpuPool.d_binEntries) cudaFree(g_gpuPool.d_binEntries);
+        err = cudaMalloc(&g_gpuPool.d_binEntries, binEntriesSize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for binEntries: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+        g_gpuPool.binEntriesCapacity = binEntriesSize;
     }
     
-    // Async copy to device using stream
+    if (resultsSize > g_gpuPool.resultsCapacity || !g_gpuPool.d_results) {
+        if (g_gpuPool.d_results) cudaFree(g_gpuPool.d_results);
+        err = cudaMalloc(&g_gpuPool.d_results, resultsSize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for results: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+        g_gpuPool.resultsCapacity = resultsSize;
+    }
+    
+    // Cast to proper types for use
+    DevSubCube_t* d_newEntry = (DevSubCube_t*)g_gpuPool.d_newEntry;
+    DevSubCube_t* d_binEntries = (DevSubCube_t*)g_gpuPool.d_binEntries;
+    ComparisonResult_t* d_results = (ComparisonResult_t*)g_gpuPool.d_results;
+    
+    // Async copy to device using stream (always copy per-call data)
     cudaMemcpyAsync(d_newEntry, pNewEntry, newEntrySize, 
                     cudaMemcpyHostToDevice, g_gpuPool.stream);
     cudaMemcpyAsync(d_binEntries, pBinEntries, binEntriesSize, 
                     cudaMemcpyHostToDevice, g_gpuPool.stream);
-    cudaMemcpyAsync(g_gpuPool.d_cubeData, pCubeData, cubeDataSize, 
-                    cudaMemcpyHostToDevice, g_gpuPool.stream);
-    cudaMemcpyAsync(g_gpuPool.d_cubeOffsets, pCubeOffsets, cubeOffsetsSize, 
-                    cudaMemcpyHostToDevice, g_gpuPool.stream);
-    cudaMemcpyAsync(g_gpuPool.d_cubeSizes, pCubeSizes, cubeSizesSize, 
-                    cudaMemcpyHostToDevice, g_gpuPool.stream);
-    cudaMemcpyAsync(g_gpuPool.d_outputID, pOutputID, outputIDSize, 
-                    cudaMemcpyHostToDevice, g_gpuPool.stream);
+    
+    // Only transfer bulk data if not already on GPU (huge optimization!)
+    if (!bSkipCubeTransfer) {
+        cudaMemcpyAsync(g_gpuPool.d_cubeData, pCubeData, cubeDataSize, 
+                        cudaMemcpyHostToDevice, g_gpuPool.stream);
+        cudaMemcpyAsync(g_gpuPool.d_cubeOffsets, pCubeOffsets, cubeOffsetsSize, 
+                        cudaMemcpyHostToDevice, g_gpuPool.stream);
+        cudaMemcpyAsync(g_gpuPool.d_cubeSizes, pCubeSizes, cubeSizesSize, 
+                        cudaMemcpyHostToDevice, g_gpuPool.stream);
+        cudaMemcpyAsync(g_gpuPool.d_outputID, pOutputID, outputIDSize, 
+                        cudaMemcpyHostToDevice, g_gpuPool.stream);
+    }
     
     // Launch kernel on stream (async)
     int threadsPerBlock = 256;
@@ -421,9 +483,6 @@ int LaunchParallelEntryCompare(
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(err));
-        cudaFree(d_newEntry);
-        cudaFree(d_binEntries);
-        cudaFree(d_results);
         return -1;
     }
     
@@ -431,26 +490,22 @@ int LaunchParallelEntryCompare(
     cudaMemcpyAsync(pResults, d_results, resultsSize, 
                     cudaMemcpyDeviceToHost, g_gpuPool.stream);
     
-    // **KEY**: Only synchronize at the end
-    err = cudaStreamSynchronize(g_gpuPool.stream);
+    // Record event after all async operations are queued
+    err = cudaEventRecord(g_gpuPool.transferComplete, g_gpuPool.stream);
     if (err != cudaSuccess) {
-        fprintf(stderr, "Stream sync failed: %s\n", cudaGetErrorString(err));
-        cudaFree(d_newEntry);
-        cudaFree(d_binEntries);
-        cudaFree(d_results);
+        fprintf(stderr, "Event record failed: %s\n", cudaGetErrorString(err));
         return -1;
     }
     
-    // Free temporary allocations
-    cudaFree(d_newEntry);
-    cudaFree(d_binEntries);
-    cudaFree(d_results);
+    // Wait for event (more efficient than stream sync for profiling)
+    err = cudaEventSynchronize(g_gpuPool.transferComplete);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Event sync failed: %s\n", cudaGetErrorString(err));
+        return -1;
+    }
     
+    // Persistent buffers are reused, no need to free
     return 0;
-
-cleanup_and_fail:
-    fprintf(stderr, "CUDA allocation failed: %s\n", cudaGetErrorString(err));
-    return -1;
 }
 
 } // extern "C"

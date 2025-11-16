@@ -16,6 +16,7 @@
 
 ***********************************************************************/
 #include "FxchCuda.h"
+#include <cuda_runtime.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -45,10 +46,11 @@ typedef struct {
     int  nMaxCube;
     int  nCacheVersion;  // Invalidate when cubes change
     int  nCachedCubeCount;
+    int  bDataOnGPU;     // Flag: is data already transferred to GPU?
 } GPUDataCache_t;
 
 // Global cache (could be per-hash-table for better encapsulation)
-static GPUDataCache_t g_GPUCache = {NULL, NULL, NULL, 0, 0, 0, 0};
+static GPUDataCache_t g_GPUCache = {NULL, NULL, NULL, 0, 0, 0, 0, 0};
 
 ////////////////////////////////////////////////////////////////////////
 ///                     EXTERNAL DECLARATIONS                        ///
@@ -69,7 +71,8 @@ int LaunchParallelEntryCompare(
     int nMaxCube,
     int* pOutputID,
     int nSizeOutputID,
-    void* pResults);
+    void* pResults,
+    int bSkipCubeTransfer);
 
 // MurmurHash function from original implementation
 static inline void MurmurHash3_x86_32 ( const void* key,
@@ -141,15 +144,16 @@ static inline void MurmurHash3_x86_32 ( const void* key,
 static void FreeGPUDataCache()
 {
     if (g_GPUCache.pCubeData) {
-        ABC_FREE(g_GPUCache.pCubeData);
-        ABC_FREE(g_GPUCache.pCubeOffsets);
-        ABC_FREE(g_GPUCache.pCubeSizes);
+        cudaFreeHost(g_GPUCache.pCubeData);
+        cudaFreeHost(g_GPUCache.pCubeOffsets);
+        cudaFreeHost(g_GPUCache.pCubeSizes);
         g_GPUCache.pCubeData = NULL;
         g_GPUCache.pCubeOffsets = NULL;
         g_GPUCache.pCubeSizes = NULL;
         g_GPUCache.nTotalSize = 0;
         g_GPUCache.nMaxCube = 0;
         g_GPUCache.nCachedCubeCount = 0;
+        g_GPUCache.bDataOnGPU = 0;
     }
 }
 
@@ -158,7 +162,10 @@ static void FreeGPUDataCache()
   Synopsis    [ Prepare cube data for GPU transfer with caching ]
 
   Description [ Flattens cube data into contiguous arrays. Uses cache
-                to avoid repeated work. ]
+                to avoid repeated work. Returns status:
+                0 = using cache (no rebuild needed)
+                1 = rebuilt cache (data needs GPU transfer)
+                2 = cache valid, already on GPU (skip transfer) ]
 
 ***********************************************************************/
 static int PrepareCubeDataForGPU(
@@ -174,7 +181,7 @@ static int PrepareCubeDataForGPU(
     int i, j, offset = 0;
     int totalSize = 0;
     
-    // Check if we can use cached data
+    // Check if we can use cached data AND it's already on GPU
     if (g_GPUCache.pCubeData != NULL && g_GPUCache.nCachedCubeCount == nCubes) {
         // Use cached data
         *ppCubeData = g_GPUCache.pCubeData;
@@ -182,7 +189,12 @@ static int PrepareCubeDataForGPU(
         *ppCubeSizes = g_GPUCache.pCubeSizes;
         *pTotalSize = g_GPUCache.nTotalSize;
         *pMaxCube = g_GPUCache.nMaxCube;
-        return 0;  // Return 0 to indicate using cache (don't free)
+        
+        // Check if already on GPU
+        if (g_GPUCache.bDataOnGPU) {
+            return 2;  // Cache valid and on GPU - skip transfer!
+        }
+        return 0;  // Cache valid but needs transfer
     }
     
     // Free old cache if cube count changed
@@ -192,10 +204,26 @@ static int PrepareCubeDataForGPU(
     for (i = 0; i < nCubes; i++)
         totalSize += Vec_IntSize(Vec_WecEntry(vCubes, i));
     
-    // Allocate arrays
-    *ppCubeData = ABC_ALLOC(int, totalSize == 0 ? 1 : totalSize);
-    *ppCubeOffsets = ABC_ALLOC(int, nCubes == 0 ? 1 : nCubes);
-    *ppCubeSizes = ABC_ALLOC(int, nCubes == 0 ? 1 : nCubes);
+    // Allocate pinned memory for async transfers
+    cudaError_t err;
+    err = cudaMallocHost((void**)ppCubeData, (totalSize == 0 ? 1 : totalSize) * sizeof(int));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMallocHost failed for cubeData: %s\n", cudaGetErrorString(err));
+        return -1;
+    }
+    err = cudaMallocHost((void**)ppCubeOffsets, (nCubes == 0 ? 1 : nCubes) * sizeof(int));
+    if (err != cudaSuccess) {
+        cudaFreeHost(*ppCubeData);
+        fprintf(stderr, "cudaMallocHost failed for cubeOffsets: %s\n", cudaGetErrorString(err));
+        return -1;
+    }
+    err = cudaMallocHost((void**)ppCubeSizes, (nCubes == 0 ? 1 : nCubes) * sizeof(int));
+    if (err != cudaSuccess) {
+        cudaFreeHost(*ppCubeData);
+        cudaFreeHost(*ppCubeOffsets);
+        fprintf(stderr, "cudaMallocHost failed for cubeSizes: %s\n", cudaGetErrorString(err));
+        return -1;
+    }
     
     // Fill arrays
     for (i = 0; i < nCubes; i++) {
@@ -219,8 +247,9 @@ static int PrepareCubeDataForGPU(
     g_GPUCache.nTotalSize = totalSize;
     g_GPUCache.nMaxCube = nCubes;
     g_GPUCache.nCachedCubeCount = nCubes;
+    g_GPUCache.bDataOnGPU = 0;  // Data rebuilt, needs transfer
     
-    return 1;  // Return 1 to indicate new allocation (cache updated, don't free)
+    return 1;  // Return 1 to indicate new allocation (needs GPU transfer)
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -316,12 +345,14 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
     int* pCubeOffsets = NULL;
     int* pCubeSizes = NULL;
     int totalSize, maxCube;
-    int cacheStatus;  // Not used but good to track
+    int cacheStatus;
     
     cacheStatus = PrepareCubeDataForGPU(pSCHashTable->pFxchMan, vCubes, 
                                         &pCubeData, &pCubeOffsets, &pCubeSizes,
                                         &totalSize, &maxCube);
-    (void)cacheStatus;  // Suppress unused warning
+    
+    // Determine if we can skip cube data transfer (status 2 = already on GPU)
+    int bSkipTransfer = (cacheStatus == 2) ? 1 : 0;
     
     // Allocate results array
     ComparisonResult_t* pResults = ABC_ALLOC(ComparisonResult_t, pBin->Size - 1);
@@ -337,9 +368,13 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
         maxCube,
         Vec_IntArray(pSCHashTable->pFxchMan->vOutputID),
         pSCHashTable->pFxchMan->nSizeOutputID,
-        (void*)pResults);
+        (void*)pResults,
+        bSkipTransfer);
     
     if (cudaResult == 0) {
+        // Mark data as successfully transferred to GPU
+        g_GPUCache.bDataOnGPU = 1;
+        
         // Process results from GPU successfully
         int iEntry;
         for (iEntry = 0; iEntry < (int)pBin->Size - 1; iEntry++) {
@@ -459,7 +494,9 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
     cacheStatus = PrepareCubeDataForGPU(pSCHashTable->pFxchMan, vCubes, 
                                         &pCubeData, &pCubeOffsets, &pCubeSizes,
                                         &totalSize, &maxCube);
-    (void)cacheStatus;  // Suppress unused warning
+    
+    // Determine if we can skip cube data transfer (status 2 = already on GPU)
+    int bSkipTransfer = (cacheStatus == 2) ? 1 : 0;
     
     // Allocate results array - compare against all other entries
     ComparisonResult_t* pResults = ABC_ALLOC(ComparisonResult_t, pBin->Size);
@@ -475,9 +512,13 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
         maxCube,
         Vec_IntArray(pSCHashTable->pFxchMan->vOutputID),
         pSCHashTable->pFxchMan->nSizeOutputID,
-        (void*)pResults);
+        (void*)pResults,
+        bSkipTransfer);
     
     if (cudaResult == 0) {
+        // Mark data as successfully transferred to GPU
+        g_GPUCache.bDataOnGPU = 1;
+        
         // Process results from GPU
         int idx;
         for ( idx = 0; idx < (int)pBin->Size; idx++ )
