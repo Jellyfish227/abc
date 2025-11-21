@@ -180,9 +180,11 @@ static int PrepareCubeDataForGPU(
     int nCubes = Vec_WecSize(vCubes);
     int i, j, offset = 0;
     int totalSize = 0;
-    
     // Check if we can use cached data AND it's already on GPU
-    if (g_GPUCache.pCubeData != NULL && g_GPUCache.nCachedCubeCount == nCubes) {
+    if (g_GPUCache.pCubeData != NULL && 
+        g_GPUCache.nCachedCubeCount == nCubes && 
+        g_GPUCache.nCacheVersion == pFxchMan->vCubesVersion) 
+    {
         // Use cached data
         *ppCubeData = g_GPUCache.pCubeData;
         *ppCubeOffsets = g_GPUCache.pCubeOffsets;
@@ -247,6 +249,7 @@ static int PrepareCubeDataForGPU(
     g_GPUCache.nTotalSize = totalSize;
     g_GPUCache.nMaxCube = nCubes;
     g_GPUCache.nCachedCubeCount = nCubes;
+    g_GPUCache.nCacheVersion = pFxchMan->vCubesVersion; // Update vCubes version
     g_GPUCache.bDataOnGPU = 0;  // Data rebuilt, needs transfer
     
     return 1;  // Return 1 to indicate new allocation (needs GPU transfer)

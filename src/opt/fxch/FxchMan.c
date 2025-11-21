@@ -189,6 +189,8 @@ Fxch_Man_t* Fxch_ManAlloc( Vec_Wec_t* vCubes )
     pFxchMan->vCubesToRemove = Vec_IntAlloc( 64 );
     pFxchMan->vSCC = Vec_IntAlloc( 64 );
 
+    pFxchMan->vCubesVersion = 0;
+
     return pFxchMan;
 }
 
@@ -761,6 +763,11 @@ void Fxch_ManUpdate( Fxch_Man_t* pFxchMan,
     }
 
     pFxchMan->nExtDivs++;
+    if (Vec_IntSize( pFxchMan->vCubesToUpdate ) > 0 ||
+        Vec_IntSize( pFxchMan->vSCC ) > 0) 
+    {
+        pFxchMan->vCubesVersion++; // Idk how safe this is but we'll see
+    }
 }
 
 /* Print */
