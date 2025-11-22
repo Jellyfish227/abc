@@ -384,7 +384,8 @@ static inline void Fxch_ManExtractDivFromCube( Fxch_Man_t* pFxchMan,
         Vec_IntPush( vCube0, Abc_Var2Lit( iVarNew, 0 ) );
         Vec_IntPush( vLitP, Vec_WecLevelId( pFxchMan->vCubes, vCube0 ) );
         Vec_IntPush( pFxchMan->vCubesToUpdate, iCube0 );
-
+        
+        pFxchMan->vCubesVersion++;
         pFxchMan->nLits--;
     }
 }
@@ -441,7 +442,7 @@ static inline void Fxch_ManExtractDivFromCubePairs( Fxch_Man_t* pFxchMan,
                 Vec_IntRemove( Vec_WecEntry( pFxchMan->vLits, Abc_LitNot( Abc_Lit2Var( Lit ) ) ),
                                Vec_WecLevelId( pFxchMan->vCubes, vCube0 ) );
             }
-
+            pFxchMan->vCubesVersion++;
         }
         /* Unexact Extraction */
         else
@@ -485,7 +486,7 @@ static inline void Fxch_ManExtractDivFromCubePairs( Fxch_Man_t* pFxchMan,
                 Vec_IntPush( pFxchMan->vCubesToUpdate, iCube1 );
             else
                 Vec_IntClear( vCube1 );
-
+            pFxchMan->vCubesVersion++;
         }
         Vec_IntFree( vCube0Copy );
         Vec_IntFree( vCube1Copy );
@@ -508,6 +509,7 @@ static inline void Fxch_ManExtractDivFromCubePairs( Fxch_Man_t* pFxchMan,
                 Vec_IntPush( vLitP, Vec_WecLevelId( pFxchMan->vCubes, vCube ) );
                 Vec_IntSort( vLitP, 0 );
             }
+            pFxchMan->vCubesVersion++;
         }
     }
 
@@ -540,6 +542,7 @@ static inline int Fxch_ManCreateCube( Fxch_Man_t* pFxchMan,
     vCube0 = Vec_WecPushLevel( pFxchMan->vCubes );
     Vec_IntPush( vCube0, iVarNew );
     Vec_IntPushArray( pFxchMan->vOutputID, pFxchMan->pTempOutputID, pFxchMan->nSizeOutputID );
+    pFxchMan->vCubesVersion++;
 
     if ( Vec_IntSize( pFxchMan->vDiv ) == 2 )
     {
@@ -549,6 +552,7 @@ static inline int Fxch_ManCreateCube( Fxch_Man_t* pFxchMan,
         Vec_IntPush( vCube0, Abc_LitNot( Lit0 ) );
         Vec_IntPush( vCube0, Abc_LitNot( Lit1 ) );
         Level = 1 + Fxch_ManComputeLevelCube( pFxchMan, vCube0 );
+        pFxchMan->vCubesVersion++;
     }
     else
     {
@@ -563,6 +567,7 @@ static inline int Fxch_ManCreateCube( Fxch_Man_t* pFxchMan,
         Fxch_DivSepareteCubes( pFxchMan->vDiv, vCube0, vCube1 );
         Level = 2 + Abc_MaxInt( Fxch_ManComputeLevelCube( pFxchMan, vCube0 ),
                                 Fxch_ManComputeLevelCube( pFxchMan, vCube1 ) );
+        pFxchMan->vCubesVersion++;
 
         Vec_IntPush( pFxchMan->vCubesToUpdate, Vec_WecLevelId( pFxchMan->vCubes, vCube0 ) );
         Vec_IntPush( pFxchMan->vCubesToUpdate, Vec_WecLevelId( pFxchMan->vCubes, vCube1 ) );
@@ -711,6 +716,7 @@ void Fxch_ManUpdate( Fxch_Man_t* pFxchMan,
                 }
                 Vec_IntClear( Vec_WecEntry( pFxchMan->vCubes, iCube0 ) );
                 Vec_WecIntXorMark( vCube0 );
+                pFxchMan->vCubesVersion++;
                 continue;
             }
 
@@ -721,6 +727,7 @@ void Fxch_ManUpdate( Fxch_Man_t* pFxchMan,
             {
                 Vec_IntClear( Vec_WecEntry( pFxchMan->vCubes, iCube0 ) );
                 Vec_WecIntXorMark( vCube0 );
+                pFxchMan->vCubesVersion++;
             }
             else
             {
@@ -735,6 +742,7 @@ void Fxch_ManUpdate( Fxch_Man_t* pFxchMan,
                 {
                     Vec_IntClear( Vec_WecEntry( pFxchMan->vCubes, iCube0 ) );
                     Vec_WecIntXorMark( vCube0 );
+                    pFxchMan->vCubesVersion++;
                 }
             }
         }
@@ -763,11 +771,6 @@ void Fxch_ManUpdate( Fxch_Man_t* pFxchMan,
     }
 
     pFxchMan->nExtDivs++;
-    if (Vec_IntSize( pFxchMan->vCubesToUpdate ) > 0 ||
-        Vec_IntSize( pFxchMan->vSCC ) > 0) 
-    {
-        pFxchMan->vCubesVersion++; // Idk how safe this is but we'll see
-    }
 }
 
 /* Print */
