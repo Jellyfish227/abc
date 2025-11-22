@@ -182,7 +182,7 @@ static int PrepareCubeDataForGPU(
     int totalSize = 0;
     // Check if we can use cached data AND it's already on GPU
 
-    printf("[DEBUG] nCacheVersion %d, vCubesVersion %d", g_GPUCache.nCacheVersion, pFxchMan->vCubesVersion);
+    // printf("[DEBUG] nCacheVersion %d, vCubesVersion %d\n", g_GPUCache.nCacheVersion, pFxchMan->vCubesVersion);
 
     if (g_GPUCache.pCubeData != NULL && 
         g_GPUCache.nCachedCubeCount == nCubes && 
