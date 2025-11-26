@@ -7,9 +7,9 @@ SRC +=  src/opt/fxch/Fxch.c \
 NVCC := $(shell which nvcc 2>/dev/null)
 ifdef NVCC
     ABC_USE_CUDA ?= 1
-    $(info $(MSG_PREFIX)Found NVCC at $(NVCC) - enabling CUDA support)
+    $(call abc_info,$(MSG_PREFIX)Found NVCC at $(NVCC) - enabling CUDA support)
     include $(ABCSRC)/src/opt/fxchcuda/module.make 
 else
     ABC_USE_CUDA ?= 0
-    $(info $(MSG_PREFIX)NVCC not found - building CPU-only)
+    $(call abc_info,$(MSG_PREFIX)NVCC not found - building CPU-only)
 endif
