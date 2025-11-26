@@ -95,6 +95,7 @@ struct Fxch_Man_t_
 
     /* internal data */
     Fxch_SCHashTable_t* pSCHashTable;
+    int vCubesVersion; /* increments when vCube has been updated */
 
     Vec_Wec_t*    vLits;        /* lit -> cube */
     Vec_Int_t*    vLitCount;    /* literal counts (currently not used) */
