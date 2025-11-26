@@ -13,8 +13,8 @@ CUDA_SRC += src/opt/fxchcuda/Kernel.cu
 # cuCollection
 CUDA_INCLUDE_FLAGS = -Ilib/extern/cuCollections/include
 
-CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS) -I./lib/readline/include -I./lib/ncurses/include
-LDFLAGS	  += -L./lib/readline/lib -lreadline -L./lib/ncurses/lib -lncurses
+CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS)
+LDFLAGS	  += 
 
 CXXFLAGS += CUDA_INCLUDE_FLAGS
 
