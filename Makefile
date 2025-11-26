@@ -18,24 +18,37 @@ PROG := abc
 OS := $(shell uname -s)
 
 MODULES := \
-	$(wildcard src/ext*) \
-	src/base/abc src/base/abci src/base/cmd src/base/io src/base/main src/base/exor \
-	src/base/ver src/base/wlc src/base/wln src/base/acb src/base/bac src/base/cba src/base/pla src/base/test \
-	src/map/mapper src/map/mio src/map/super src/map/if src/map/if/acd \
-	src/map/amap src/map/cov src/map/scl src/map/mpm \
-	src/misc/extra src/misc/mvc src/misc/st src/misc/util src/misc/nm \
-	src/misc/vec src/misc/hash src/misc/tim src/misc/bzlib src/misc/zlib \
-	src/misc/mem src/misc/bar src/misc/bbl src/misc/parse \
-	src/opt/cut src/opt/fxu src/opt/fxch src/opt/fxchcuda src/opt/rwr src/opt/mfs src/opt/sim \
-	src/opt/ret src/opt/fret src/opt/res src/opt/lpk src/opt/nwk src/opt/rwt src/opt/rar \
-	src/opt/cgt src/opt/csw src/opt/dar src/opt/dau src/opt/dsc src/opt/sfm src/opt/sbd src/opt/eslim \
-	src/sat/bsat src/sat/xsat src/sat/satoko src/sat/csat src/sat/msat src/sat/psat src/sat/cnf src/sat/bmc src/sat/glucose src/sat/glucose2 src/sat/kissat src/sat/cadical \
-	src/bool/bdc src/bool/deco src/bool/dec src/bool/kit src/bool/lucky \
-	src/bool/rsb src/bool/rpo \
-	src/proof/pdr src/proof/abs src/proof/live src/proof/ssc src/proof/int \
-	src/proof/cec src/proof/acec src/proof/dch src/proof/fraig src/proof/fra src/proof/ssw \
-	src/aig/aig src/aig/saig src/aig/gia src/aig/ioa src/aig/ivy src/aig/hop \
-	src/aig/miniaig
+    $(wildcard src/ext*) \
+    src/base/abc src/base/abci src/base/cmd src/base/io src/base/main src/base/exor \
+    src/base/ver src/base/wlc src/base/wln src/base/acb src/base/bac src/base/cba src/base/pla src/base/test \
+    src/map/mapper src/map/mio src/map/super src/map/if src/map/if/acd \
+    src/map/amap src/map/cov src/map/scl src/map/mpm \
+    src/misc/extra src/misc/mvc src/misc/st src/misc/util src/misc/nm \
+    src/misc/vec src/misc/hash src/misc/tim src/misc/bzlib src/misc/zlib \
+    src/misc/mem src/misc/bar src/misc/bbl src/misc/parse \
+    src/opt/cut src/opt/fxu src/opt/fxch src/opt/rwr src/opt/mfs src/opt/sim \
+    src/opt/ret src/opt/fret src/opt/res src/opt/lpk src/opt/nwk src/opt/rwt src/opt/rar \
+    src/opt/cgt src/opt/csw src/opt/dar src/opt/dau src/opt/dsc src/opt/sfm src/opt/sbd src/opt/eslim \
+    src/sat/bsat src/sat/xsat src/sat/satoko src/sat/csat src/sat/msat src/sat/psat src/sat/cnf src/sat/bmc src/sat/glucose src/sat/glucose2 src/sat/kissat src/sat/cadical \
+    src/bool/bdc src/bool/deco src/bool/dec src/bool/kit src/bool/lucky \
+    src/bool/rsb src/bool/rpo \
+    src/proof/pdr src/proof/abs src/proof/live src/proof/ssc src/proof/int \
+    src/proof/cec src/proof/acec src/proof/dch src/proof/fraig src/proof/fra src/proof/ssw \
+    src/aig/aig src/aig/saig src/aig/gia src/aig/ioa src/aig/ivy src/aig/hop \
+    src/aig/miniaig
+
+NVCC := nvcc
+LD   := $(CXX)
+
+# Auto-detect NVCC availability
+NVCC_PATH := $(shell which nvcc 2>/dev/null)
+ifdef NVCC_PATH
+  ABC_USE_CUDA ?= 1
+  $(info $(MSG_PREFIX)Found NVCC at $(NVCC_PATH) - enabling CUDA support)
+else
+  ABC_USE_CUDA ?= 0
+  $(info $(MSG_PREFIX)NVCC not found - building CPU-only)
+endif
 
 all: $(PROG)
 default: $(PROG)

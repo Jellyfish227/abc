@@ -16,7 +16,7 @@
 
 ***********************************************************************/
 #include "Fxch.h"
-#include "../fxchcuda/FxchCuda.h"
+#include "FxchBackend.h"
 
 #define USINGGPU 1 // if you want to use the old implementation, ***
 
@@ -33,19 +33,20 @@ static inline int Fxch_ManSCAddRemove( Fxch_Man_t* pFxchMan,
                                        char fAdd,
                                        char fUpdate )
 {
+    Fxch_Backend_t* pBackend = Fxch_GetBackend();
     int ret = 0;
 
     if ( fAdd )
     {
-        ret = FxchCuda_SCHashTableInsert( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+        ret = pBackend->SCHashTableInsert( pFxchMan->pSCHashTable, pFxchMan->vCubes,
                                       SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate, USINGGPU );
+                                      iCube, iLit0, iLit1, fUpdate);
     }
     else
     {
-        ret = FxchCuda_SCHashTableRemove( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+        ret = pBackend->SCHashTableRemove( pFxchMan->pSCHashTable, pFxchMan->vCubes,
                                       SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate, USINGGPU );
+                                      iCube, iLit0, iLit1, fUpdate);
     }
 
     return ret;
@@ -269,6 +270,7 @@ void Fxch_ManGenerateLitHashKeys( Fxch_Man_t* pFxchMan )
 
 void Fxch_ManSCHashTablesInit( Fxch_Man_t* pFxchMan )
 {
+    Fxch_Backend_t* pBackend = Fxch_GetBackend();
     Vec_Wec_t* vCubes = pFxchMan->vCubes;
     Vec_Int_t* vCube;
     int iCube,
@@ -282,12 +284,13 @@ void Fxch_ManSCHashTablesInit( Fxch_Man_t* pFxchMan )
         nTotalHashed += nSubCubes + 1;
     }
 
-    pFxchMan->pSCHashTable = FxchCuda_SCHashTableCreate( pFxchMan, nTotalHashed, USINGGPU );
+    pFxchMan->pSCHashTable = pBackend->SCHashTableCreate(pFxchMan, nTotalHashed);
 }
 
 void Fxch_ManSCHashTablesFree( Fxch_Man_t* pFxchMan )
 {
-    FxchCuda_SCHashTableDelete( pFxchMan->pSCHashTable, USINGGPU);
+    Fxch_Backend_t* pBackend = Fxch_GetBackend();
+    pBackend->SCHashTableDelete(pFxchMan->pSCHashTable);
 }
 
 void Fxch_ManDivCreate( Fxch_Man_t* pFxchMan )
