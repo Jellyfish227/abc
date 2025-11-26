@@ -34,15 +34,27 @@ static inline int Fxch_ManSCAddRemove( Fxch_Man_t* pFxchMan,
 
     if ( fAdd )
     {
-        ret = Fxch_SCHashTableInsert( pFxchMan->pSCHashTable, pFxchMan->vCubes,
-                                      SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate );
+        ret = \
+        #ifndef ABC_USE_CUDA
+            Fxch_SCHashTableInsert
+        #else
+            FxchCuda_SCHashTableInsert
+        #endif
+        ( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+            SubCubeID,
+            iCube, iLit0, iLit1, fUpdate );
     }
     else
     {
-        ret = Fxch_SCHashTableRemove( pFxchMan->pSCHashTable, pFxchMan->vCubes,
-                                      SubCubeID,
-                                      iCube, iLit0, iLit1, fUpdate );
+        ret = \
+        #ifndef ABC_USE_CUDA
+            Fxch_SCHashTableRemove
+        #else
+            FxchCuda_SCHashTableRemove
+        #endif
+        ( pFxchMan->pSCHashTable, pFxchMan->vCubes,
+            SubCubeID,
+            iCube, iLit0, iLit1, fUpdate );
     }
 
     return ret;
