@@ -6,10 +6,9 @@ SRC +=  src/opt/fxch/Fxch.c \
 # if nvcc in environment, discover fxch-cuda
 NVCC := $(shell which nvcc 2>/dev/null)
 ifdef NVCC
-    ABC_USE_CUDA ?= 1
+    CFLAGS += -DABC_USE_CUDA    # Pass ABC_USE_CUDA to FxchMan to branch func call
     $(call abc_info,$(MSG_PREFIX)Found NVCC at $(NVCC) - enabling CUDA support)
     include $(ABCSRC)/src/opt/fxchcuda/module.make 
 else
-    ABC_USE_CUDA ?= 0
     $(call abc_info,$(MSG_PREFIX)NVCC not found - building CPU-only)
 endif
