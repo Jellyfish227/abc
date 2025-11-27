@@ -39,9 +39,9 @@ ABC_NAMESPACE_HEADER_START
 
 
 /*===== FxchCudaSCHashTable.c ============================================*/
-Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu );
+Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries );
 
-void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t*, short int usingGpu );
+void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* );
 
 int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
                             Vec_Wec_t* vCubes,
@@ -49,8 +49,7 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
                             uint32_t iCube,
                             uint32_t iLit0,
                             uint32_t iLit1,
-                            char fUpdate,
-                            short int usingGpu );
+                            char fUpdate );
 
 
 int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
@@ -59,11 +58,10 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
                             uint32_t iCube,
                             uint32_t iLit0,
                             uint32_t iLit1,
-                            char fUpdate,
-                            short int usingGpu );
+                            char fUpdate );
 
-unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* , short int usingGpu);
-void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* , short int usingGpu);
+unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* );
+void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* );
 
 
 ABC_NAMESPACE_HEADER_END

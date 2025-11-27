@@ -264,12 +264,12 @@ static int PrepareCubeDataForGPU(
 
 // These are all wrappers with fallbacks to the original fxch implementation
 
-Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries, short int usingGpu )
+Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntries )
 {
     Fxch_SCHashTable_t* pTable = Fxch_SCHashTableCreate(pFxchMan, nEntries);
     
     // Initialize CUDA system if using GPU
-    if (usingGpu && pTable != NULL) {
+    if (pTable != NULL) {
         if (InitCUDASystem() != 0) {
             printf("[CUDA] Warning: Failed to initialize CUDA system, will use CPU fallback\n");
         } else {
@@ -281,14 +281,12 @@ Fxch_SCHashTable_t* FxchCuda_SCHashTableCreate( Fxch_Man_t* pFxchMan, int nEntri
 }
 
 
-void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable, short int usingGpu)
+void FxchCuda_SCHashTableDelete( Fxch_SCHashTable_t* pSCHashTable )
 {
     // Clean up GPU resources
-    if (usingGpu) {
-        FreeGPUDataCache();
-        CleanupCUDASystem();
-        printf("[CUDA] Cleaned up GPU resources\n");
-    }
+    FreeGPUDataCache();
+    CleanupCUDASystem();
+    printf("[CUDA] Cleaned up GPU resources\n");
     
     // Call original delete function
     Fxch_SCHashTableDelete(pSCHashTable);
@@ -300,14 +298,8 @@ int FxchCuda_SCHashTableInsert( Fxch_SCHashTable_t* pSCHashTable,
                             uint32_t iCube,
                             uint32_t iLit0,
                             uint32_t iLit1,
-                            char fUpdate,
-                            short int usingGpu )
-{
-    // Early exit - use CPU version
-    if (!usingGpu) {
-        return Fxch_SCHashTableInsert(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
-    }
-    
+                            char fUpdate )
+{    
     int iNewEntry;
     int Pairs = 0;
     uint32_t BinID;
@@ -458,14 +450,8 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
                             uint32_t iCube,
                             uint32_t iLit0,
                             uint32_t iLit1,
-                            char fUpdate,
-                            short int usingGpu )
-{
-    // Early exit - use CPU version
-    if (!usingGpu) {
-        return Fxch_SCHashTableRemove(pSCHashTable, vCubes, SubCubeID, iCube, iLit0, iLit1, fUpdate);
-    }
-    
+                            char fUpdate )
+{   
     int iEntry;
     int Pairs = 0;
     uint32_t BinID;
@@ -590,12 +576,12 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
 }
 
 
-unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, short int usingGpu) 
+unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable ) 
 {
     // Memory usage is same as original plus cache
     unsigned int memory = Fxch_SCHashTableMemory(pHashTable);
     
-    if (usingGpu && g_GPUCache.pCubeData != NULL) {
+    if (g_GPUCache.pCubeData != NULL) {
         // Add cache memory
         memory += g_GPUCache.nTotalSize * sizeof(int);
         memory += g_GPUCache.nMaxCube * sizeof(int) * 2; // offsets + sizes
@@ -605,13 +591,9 @@ unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable, short i
 }
 
 
-void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable, short int usingGpu)
+void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable )
 {
-    // Early exit
-    if (!usingGpu) {
-        Fxch_SCHashTablePrint(pHashTable);
-        return;
-    }
+    Fxch_SCHashTablePrint(pHashTable);
 };
 
 ////////////////////////////////////////////////////////////////////////
