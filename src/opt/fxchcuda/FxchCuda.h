@@ -61,7 +61,6 @@ int FxchCuda_SCHashTableRemove( Fxch_SCHashTable_t* pSCHashTable,
                             char fUpdate );
 
 unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* );
-void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* );
 
 
 ABC_NAMESPACE_HEADER_END
