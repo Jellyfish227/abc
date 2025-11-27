@@ -298,7 +298,7 @@ void Fxch_ManSCHashTablesInit( Fxch_Man_t* pFxchMan )
 #else
     FxchCuda_SCHashTableCreate
 #endif
-    Fxch_SCHashTableCreate( pFxchMan, nTotalHashed );
+    ( pFxchMan, nTotalHashed );
 }
 
 void Fxch_ManSCHashTablesFree( Fxch_Man_t* pFxchMan )
