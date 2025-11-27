@@ -590,12 +590,6 @@ unsigned int FxchCuda_SCHashTableMemory( Fxch_SCHashTable_t* pHashTable )
     return memory;
 }
 
-
-void FxchCuda_SCHashTablePrint( Fxch_SCHashTable_t* pHashTable )
-{
-    Fxch_SCHashTablePrint(pHashTable);
-};
-
 ////////////////////////////////////////////////////////////////////////
 ///                       END OF FILE                                ///
 ////////////////////////////////////////////////////////////////////////
