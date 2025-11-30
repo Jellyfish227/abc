@@ -13,14 +13,11 @@ CUDA_SRC += src/opt/fxchcuda/Kernel.cu
 # cuCollection
 CUDA_INCLUDE_FLAGS = -Ilib/extern/cuCollections/include
 
-CFLAGS    += -g -pg -no-pie -Wall -Wno-unused-function -Wno-write-strings -Wno-sign-compare $(ARCHFLAGS)
-LDFLAGS	  += 
-
-CXXFLAGS += CUDA_INCLUDE_FLAGS
+CFLAGS    += $(CUDA_INCLUDE_FLAGS)
+CXXFLAGS  += $(CUDA_INCLUDE_FLAGS)
 
 # Add CUDA objects if CUDA sources exist
 CUDA_OBJ := $(patsubst %.cu, %.o, $(CUDA_SRC))
-OBJ += $(CUDA_OBJ)
 
 # CUDA compilation rules
 %.o: %.cu

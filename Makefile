@@ -169,6 +169,10 @@ OBJ := \
 	$(patsubst %.c, %.o,  $(filter %.c, $(SRC)))  \
 	$(patsubst %.y, %.o,  $(filter %.y, $(SRC)))
 
+ifdef CUDA_OBJ
+OBJ += $(CUDA_OBJ)
+endif
+
 LIBOBJ := $(filter-out src/base/main/main.o,$(OBJ))
 
 DEP := $(OBJ:.o=.d)
