@@ -31,7 +31,7 @@ ABC_NAMESPACE_IMPL_START
 
   SideEffects []
 
-  SeeAlso     []
+    SeeAlso     []
 
 ***********************************************************************/
 void Fxch_CubesGruping(Fxch_Man_t* pFxchMan)
@@ -78,12 +78,13 @@ void Fxch_CubesGruping(Fxch_Man_t* pFxchMan)
                 pFxchMan->pTempOutputID[i] = 0;
 
             pFxchMan->pTempOutputID[ iTranslation >> 5 ] = Temp;
-            Vec_IntPushArray( pFxchMan->vOutputID, pFxchMan->pTempOutputID, SizeOutputID ); 
+            Vec_IntPushArray( pFxchMan->vOutputID, pFxchMan->pTempOutputID, SizeOutputID ); // potential integer overflow here
         }
         else
         {
             Vec_IntClear( vCube );
             pEntry = Vec_IntEntryP( pFxchMan->vOutputID, ( iCubeNoID * SizeOutputID ) + ( iTranslation >> 5 ) );
+            printf("iCubeNoID * SizeOutputID = %d", iCubeNoID * SizeOutputID) // potential integer overflow here
             *pEntry |= Temp;
         }
     }
