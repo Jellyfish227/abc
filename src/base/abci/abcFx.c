@@ -23,6 +23,7 @@
 #include "misc/vec/vecQue.h"
 #include "misc/vec/vecHsh.h"
 #include "opt/fxch/Fxch.h"
+#include <omp.h>
 
 ABC_NAMESPACE_IMPL_START
 
@@ -852,29 +853,268 @@ void Fx_ManCubeDoubleCubeDivisors( Fx_Man_t * p, int iFirst, Vec_Int_t * vPivot,
         }
     } 
 }
-void Fx_ManCreateDivisors( Fx_Man_t * p )
+////////////////////////////////////////////////////////////////////////
+// OMP-PARALLEL DIVISOR CREATION
+////////////////////////////////////////////////////////////////////////
+
+/* Per-thread staging buffer.
+ * vKeys : packed divisor keys — [nLits, lit0, ..., lit_{n-1}, ...]
+ * vIncs : one float weight-increment per entry
+ * vSCC  : thread-local single-cube-containment cube IDs
+ * nDivMux, nPairs: per-thread stats, folded into p after parallel phase */
+typedef struct Fx_DivBuf_t_ {
+    Vec_Int_t * vKeys;
+    Vec_Flt_t * vIncs;
+    Vec_Int_t * vSCC;
+    int         nDivMux[3];
+    int         nPairs;
+} Fx_DivBuf_t;
+
+static Fx_DivBuf_t * Fx_DivBufAlloc()
+{
+    Fx_DivBuf_t * p = ABC_CALLOC( Fx_DivBuf_t, 1 );
+    p->vKeys = Vec_IntAlloc( 2048 );
+    p->vIncs = Vec_FltAlloc( 512  );
+    p->vSCC  = Vec_IntAlloc( 64   );
+    return p;
+}
+static void Fx_DivBufFree( Fx_DivBuf_t * p )
+{
+    if ( !p ) return;
+    Vec_IntFree( p->vKeys );
+    Vec_FltFree( p->vIncs );
+    Vec_IntFree( p->vSCC  );
+    ABC_FREE( p );
+}
+static inline void Fx_DivBufClear( Fx_DivBuf_t * p )
+{
+    Vec_IntClear( p->vKeys );
+    Vec_FltClear( p->vIncs );
+    Vec_IntClear( p->vSCC  );
+    p->nDivMux[0] = p->nDivMux[1] = p->nDivMux[2] = 0;
+    p->nPairs = 0;
+}
+static inline void Fx_DivBufPush( Fx_DivBuf_t * pBuf, Vec_Int_t * vDiv, float fInc )
+{
+    int i, Lit;
+    Vec_IntPush( pBuf->vKeys, Vec_IntSize(vDiv) );
+    Vec_IntForEachEntry( vDiv, Lit, i )
+        Vec_IntPush( pBuf->vKeys, Lit );
+    Vec_FltPush( pBuf->vIncs, fInc );
+}
+
+/* Thread-safe version of Fx_ManCubeSingleCubeDivisors (fRemove=0, fUpdate=0).
+ * Uses thread-local vCubeFree scratch instead of p->vCubeFree.            */
+static int Fx_ManCubeSingleCubeDivisors_Local( Vec_Int_t   * vPivot,
+                                                Fx_DivBuf_t * pBuf,
+                                                Vec_Int_t   * vCubeFree )
+{
+    int k, n, Lit, Lit2;
+    if ( Vec_IntSize(vPivot) < 2 )
+        return 0;
+    Vec_IntForEachEntryStart( vPivot, Lit, k, 1 )
+    Vec_IntForEachEntryStart( vPivot, Lit2, n, k+1 )
+    {
+        assert( Lit < Lit2 );
+        Vec_IntClear( vCubeFree );
+        Vec_IntPush( vCubeFree, Abc_Var2Lit(Abc_LitNot(Lit),  0) );
+        Vec_IntPush( vCubeFree, Abc_Var2Lit(Abc_LitNot(Lit2), 1) );
+        Fx_DivBufPush( pBuf, vCubeFree, 1.0f );
+        pBuf->nPairs++;
+    }
+    return Vec_IntSize(vPivot) * (Vec_IntSize(vPivot) - 1) / 2;
+}
+
+/* Thread-safe version of Fx_ManCubeDoubleCubeDivisors (fRemove=0, fUpdate=0).
+ * p->vCubes and p->vLevels are READ-ONLY during this phase — safe.
+ * Thread-local vCubeFree replaces p->vCubeFree.
+ * Thread-local pBuf->vSCC replaces p->vSCC.                               */
+static void Fx_ManCubeDoubleCubeDivisors_Local( Fx_Man_t    * p,
+                                                 int           iFirst,
+                                                 Vec_Int_t   * vPivot,
+                                                 Fx_DivBuf_t * pBuf,
+                                                 Vec_Int_t   * vCubeFree,
+                                                 int         * pfWarning )
 {
     Vec_Int_t * vCube;
+    int i, Base;
+    Vec_WecForEachLevelStart( p->vCubes, vCube, i, iFirst )
+    {
+        if ( Vec_IntSize(vCube) == 0 || vCube == vPivot )
+            continue;
+        if ( Vec_WecIntHasMark(vCube) && Vec_WecIntHasMark(vPivot) && vCube > vPivot )
+            continue;
+        if ( Vec_IntEntry(vCube, 0) != Vec_IntEntry(vPivot, 0) )
+            break;  /* cubes are sorted by node ID — no more same-node pairs */
+
+        Base = Fx_ManDivFindCubeFree( vCube, vPivot, vCubeFree, pfWarning );
+        if ( Base == -1 )
+        {
+            /* Single-cube containment: record in thread-local SCC buffer.
+             * Merged into p->vSCC after parallel phase, consumed by Fx_ManUpdate. */
+            if ( Vec_IntSize(vCube) > Vec_IntSize(vPivot) )
+                Vec_IntPush( pBuf->vSCC, Vec_WecLevelId(p->vCubes, vCube)  );
+            else
+                Vec_IntPush( pBuf->vSCC, Vec_WecLevelId(p->vCubes, vPivot) );
+            continue;
+        }
+        if ( Vec_IntSize(vCubeFree) == 4 )
+        {
+            int Value = Fx_ManDivNormalize( vCubeFree );  /* in-place on local scratch */
+            if      ( Value == 0 ) pBuf->nDivMux[0]++;
+            else if ( Value == 1 ) pBuf->nDivMux[1]++;
+            else                   pBuf->nDivMux[2]++;
+            if ( p->fCanonDivs && Value < 0 )
+                continue;
+        }
+        if ( p->LitCountMax && p->LitCountMax < Vec_IntSize(vCubeFree) )
+            continue;
+        if ( p->fCanonDivs && Vec_IntSize(vCubeFree) == 3 )
+            continue;
+        Fx_DivBufPush( pBuf, vCubeFree, (float)(Base + Vec_IntSize(vCubeFree) - 1) );
+        pBuf->nPairs++;
+    }
+}
+
+/* Serial merge — single-cube pass.
+ * Folds one thread's buffer into the shared p->pHash / p->vWeights.
+ * First-seen check (iDiv == Vec_FltSize) applies the base weight init. */
+static void Fx_ManMergeSingleCubeBuf( Fx_Man_t * p, Fx_DivBuf_t * pBuf )
+{
+    int   * pKeys = Vec_IntArray( pBuf->vKeys );
+    int     nKeys = Vec_IntSize(  pBuf->vKeys );
+    int     pos   = 0;
+    Vec_Int_t * vDiv = Vec_IntAlloc( 4 );
+    while ( pos < nKeys )
+    {
+        int n = pKeys[pos++], iDiv, k;
+        Vec_IntClear( vDiv );
+        for ( k = 0; k < n; k++ )
+            Vec_IntPush( vDiv, pKeys[pos++] );
+        iDiv = Hsh_VecManAdd( p->pHash, vDiv );
+        if ( Vec_FltSize(p->vWeights) == iDiv )
+        {
+            /* Exact base weight formula from original Fx_ManCubeSingleCubeDivisors */
+            Vec_FltPush( p->vWeights,
+                -2 + 0.9f - 0.001f * (float)Fx_ManComputeLevelDiv(p, vDiv) );
+            p->nDivsS++;
+        }
+        assert( iDiv < Vec_FltSize(p->vWeights) );
+        Vec_FltAddToEntry( p->vWeights, iDiv, 1.0f );
+    }
+    p->nPairsS += pBuf->nPairs;
+    Vec_IntFree( vDiv );
+}
+
+/* Serial merge — double-cube pass.
+ * Also accumulates nDivMux stats and appends thread-local SCC entries. */
+static void Fx_ManMergeDoubleCubeBuf( Fx_Man_t * p, Fx_DivBuf_t * pBuf )
+{
+    int   * pKeys = Vec_IntArray( pBuf->vKeys );
+    float * pIncs = Vec_FltArray( pBuf->vIncs );
+    int     nKeys = Vec_IntSize(  pBuf->vKeys );
+    int     pos   = 0, iEntry = 0;
+    Vec_Int_t * vDiv = Vec_IntAlloc( 16 );
+    while ( pos < nKeys )
+    {
+        int n = pKeys[pos++], iDiv, k;
+        Vec_IntClear( vDiv );
+        for ( k = 0; k < n; k++ )
+            Vec_IntPush( vDiv, pKeys[pos++] );
+        iDiv = Hsh_VecManAdd( p->pHash, vDiv );
+        if ( Vec_FltSize(p->vWeights) == iDiv )
+        {
+            /* Exact base weight formula from original Fx_ManCubeDoubleCubeDivisors */
+            Vec_FltPush( p->vWeights,
+                -(float)n + 0.9f - 0.0009f * (float)Fx_ManComputeLevelDiv(p, vDiv) );
+        }
+        assert( iDiv < Vec_FltSize(p->vWeights) );
+        Vec_FltAddToEntry( p->vWeights, iDiv, pIncs[iEntry++] );
+    }
+    p->nPairsD    += pBuf->nPairs;
+    p->nDivMux[0] += pBuf->nDivMux[0];
+    p->nDivMux[1] += pBuf->nDivMux[1];
+    p->nDivMux[2] += pBuf->nDivMux[2];
+    Vec_IntAppend( p->vSCC, pBuf->vSCC );  /* SCC consumed later by Fx_ManUpdate */
+    Vec_IntFree( vDiv );
+}
+
+/* Parallel replacement for Fx_ManCreateDivisors. */
+void Fx_ManCreateDivisors( Fx_Man_t * p )
+{
+    int nCubes   = Vec_WecSize( p->vCubes );
+    int nThreads = omp_get_max_threads();
     float Weight;
-    int i, fWarning = 0;
-    // alloc hash table
+    int i, t, fWarnLocal = 0;
+
     assert( p->pHash == NULL );
-    p->pHash = Hsh_VecManStart( 1000 );
+    p->pHash    = Hsh_VecManStart( 1000 );
     p->vWeights = Vec_FltAlloc( 1000 );
-    // create single-cube two-literal divisors
-    Vec_WecForEachLevel( p->vCubes, vCube, i )
-        Fx_ManCubeSingleCubeDivisors( p, vCube, 0, 0 ); // add - no update
+
+    /* One staging buffer + one scratch Vec_Int per thread */
+    Fx_DivBuf_t ** ppBufs    = ABC_CALLOC( Fx_DivBuf_t *, nThreads );
+    Vec_Int_t   ** ppScratch = ABC_CALLOC( Vec_Int_t *,   nThreads );
+    for ( t = 0; t < nThreads; t++ )
+    {
+        ppBufs[t]    = Fx_DivBufAlloc();
+        ppScratch[t] = Vec_IntAlloc( 16 );
+    }
+
+    /* ── Phase 1: single-cube two-literal divisors ─────────────────────
+     * O(n * k^2): each cube is independent. chunk=64 amortises OMP overhead
+     * over small cubes while keeping scheduling granularity fine enough.   */
+    #pragma omp parallel for schedule(dynamic, 64)
+    for ( i = 0; i < nCubes; i++ )
+    {
+        int tid = omp_get_thread_num();
+        Vec_Int_t * vCube = Vec_WecEntry( p->vCubes, i );
+        Fx_ManCubeSingleCubeDivisors_Local( vCube, ppBufs[tid], ppScratch[tid] );
+    }
+    /* Serial merge — must complete before Phase 2 reads nDivsS boundary */
+    for ( t = 0; t < nThreads; t++ )
+        Fx_ManMergeSingleCubeBuf( p, ppBufs[t] );
+
     assert( p->nDivsS == Vec_FltSize(p->vWeights) );
-    // create two-cube divisors
-    Vec_WecForEachLevel( p->vCubes, vCube, i )
-        Fx_ManCubeDoubleCubeDivisors( p, i+1, vCube, 0, 0, &fWarning ); // add - no update
-    // create queue with all divisors
+
+    for ( t = 0; t < nThreads; t++ )
+        Fx_DivBufClear( ppBufs[t] );
+
+    /* ── Phase 2: double-cube divisors ─────────────────────────────────
+     * O(n^2) within each node's cube group — the dominant term.
+     * Cube i only compares against i+1..end of same node, so work is
+     * non-uniform: early cubes in each node do far more work than later
+     * ones. schedule(dynamic,16) prevents load imbalance.                  */
+    #pragma omp parallel for schedule(dynamic, 16) reduction(|:fWarnLocal)
+    for ( i = 0; i < nCubes; i++ )
+    {
+        int tid = omp_get_thread_num();
+        Vec_Int_t * vCube = Vec_WecEntry( p->vCubes, i );
+        int fW = 0;
+        Fx_ManCubeDoubleCubeDivisors_Local( p, i+1, vCube,
+                                             ppBufs[tid], ppScratch[tid], &fW );
+        fWarnLocal |= fW;
+    }
+    for ( t = 0; t < nThreads; t++ )
+        Fx_ManMergeDoubleCubeBuf( p, ppBufs[t] );
+
+    /* ── Phase 3: build priority queue — serial, O(d), negligible ────── */
     p->vPrio = Vec_QueAlloc( Vec_FltSize(p->vWeights) );
     Vec_QueSetPriority( p->vPrio, Vec_FltArrayP(p->vWeights) );
     Vec_FltForEachEntry( p->vWeights, Weight, i )
         if ( Weight > 0.0 )
             Vec_QuePush( p->vPrio, i );
+
+    /* ── Cleanup ────────────────────────────────────────────────────── */
+    for ( t = 0; t < nThreads; t++ )
+    {
+        Fx_DivBufFree( ppBufs[t] );
+        Vec_IntFree( ppScratch[t] );
+    }
+    ABC_FREE( ppBufs );
+    ABC_FREE( ppScratch );
+    (void)fWarnLocal;
 }
+
 
 
 /**Function*************************************************************
