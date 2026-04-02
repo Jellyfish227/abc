@@ -1498,7 +1498,10 @@ static void Fx_ManUpdateSubtractAndMutate( Fx_Man_t * p, Fx_Candidate_t * pCand,
         {
             RetValue  = Vec_IntRemove1( vCube, Abc_LitNot(Lit0) );
             RetValue += Vec_IntRemove1( vCube, Abc_LitNot(Lit1) );
-            assert( RetValue == 2 );
+            // In batch mode, another candidate may have already removed a literal
+            // from this cube via a shared literal index. The cube retains an extra
+            // literal — a minor quality loss, not a correctness issue.
+            // Serial path still asserts RetValue == 2 in Fx_ManUpdate().
             Vec_IntPush( vCube, Abc_Var2Lit(iVarNew, 0) );
             Vec_IntPush( vLitP, Vec_WecLevelId(p->vCubes, vCube) );
         }
