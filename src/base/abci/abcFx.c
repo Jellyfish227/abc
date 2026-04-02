@@ -1783,7 +1783,8 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
                 for ( j = 0; j < Vec_IntSize(vConflict); j++ )
                 {
                     int idx = Vec_IntEntry( vConflict, j );
-                    Vec_QuePush( p->vPrio, pCands[idx].iDiv );
+                    if ( !Vec_QueIsMember(p->vPrio, pCands[idx].iDiv) )
+                        Vec_QuePush( p->vPrio, pCands[idx].iDiv );
                 }
             }
             Fx_CandFree( pCands, K );
