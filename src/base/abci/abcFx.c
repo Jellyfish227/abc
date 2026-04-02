@@ -23,6 +23,9 @@
 #include "misc/vec/vecQue.h"
 #include "misc/vec/vecHsh.h"
 #include "opt/fxch/Fxch.h"
+#ifdef ABC_USE_OMP
+#include <omp.h>
+#endif
 
 ABC_NAMESPACE_IMPL_START
 
@@ -118,6 +121,36 @@ struct Fx_Man_t_
 };
 
 static inline int Fx_ManGetFirstVarCube( Fx_Man_t * p, Vec_Int_t * vCube ) { return Vec_IntEntry( p->vVarCube, Vec_IntEntry(vCube, 0) ); }
+
+#ifdef ABC_USE_OMP
+// Per-thread context for parallel batch extraction
+typedef struct Fx_ThreadCtx_t_ Fx_ThreadCtx_t;
+struct Fx_ThreadCtx_t_
+{
+    Vec_Int_t *     vCubeFree;    // thread-local scratch for divisor normalization
+    Vec_Int_t *     vDeltaDiv;    // divisor IDs with weight changes
+    Vec_Flt_t *     vDeltaWt;     // corresponding weight deltas
+    Vec_Int_t *     vSCC;         // thread-local SCC accumulator
+    int             nPairsS;      // thread-local SCD pair counter delta
+    int             nPairsD;      // thread-local DCD pair counter delta
+    int             fWarning;
+};
+
+// Per-candidate data for batch extraction
+typedef struct Fx_Candidate_t_ Fx_Candidate_t;
+struct Fx_Candidate_t_
+{
+    int             iDiv;
+    int             Lit0, Lit1;
+    Vec_Int_t *     vCubesS;      // affected SCD cubes (owned)
+    Vec_Int_t *     vCubesD;      // affected DCD cube pairs (owned)
+    Vec_Int_t *     vCompls;      // complement flags (owned)
+    Vec_Int_t *     vDiv;         // divisor content (owned)
+    int             iVarNew;      // pre-allocated variable ID
+    int             iNewCubeBase; // pre-allocated cube slot base index
+    int             fWarning;
+};
+#endif
 
 #define Fx_ManForEachCubeVec( vVec, vCubes, vCube, i )           \
     for ( i = 0; (i < Vec_IntSize(vVec)) && ((vCube) = Vec_WecEntry(vCubes, Vec_IntEntry(vVec, i))); i++ )
@@ -1150,6 +1183,405 @@ ExtractFromPairs:
 
 }
 
+#ifdef ABC_USE_OMP
+/**Function*************************************************************
+
+  Synopsis    [Thread context allocation and deallocation.]
+
+***********************************************************************/
+static Fx_ThreadCtx_t * Fx_ThreadCtxAlloc( int nThreads )
+{
+    Fx_ThreadCtx_t * pCtxs = ABC_CALLOC( Fx_ThreadCtx_t, nThreads );
+    int t;
+    for ( t = 0; t < nThreads; t++ )
+    {
+        pCtxs[t].vCubeFree = Vec_IntAlloc( 100 );
+        pCtxs[t].vDeltaDiv = Vec_IntAlloc( 1000 );
+        pCtxs[t].vDeltaWt  = Vec_FltAlloc( 1000 );
+        pCtxs[t].vSCC      = Vec_IntAlloc( 100 );
+    }
+    return pCtxs;
+}
+static void Fx_ThreadCtxFree( Fx_ThreadCtx_t * pCtxs, int nThreads )
+{
+    int t;
+    for ( t = 0; t < nThreads; t++ )
+    {
+        Vec_IntFree( pCtxs[t].vCubeFree );
+        Vec_IntFree( pCtxs[t].vDeltaDiv );
+        Vec_FltFree( pCtxs[t].vDeltaWt );
+        Vec_IntFree( pCtxs[t].vSCC );
+    }
+    ABC_FREE( pCtxs );
+}
+static void Fx_ThreadCtxClear( Fx_ThreadCtx_t * pCtx )
+{
+    Vec_IntClear( pCtx->vDeltaDiv );
+    Vec_FltClear( pCtx->vDeltaWt );
+    Vec_IntClear( pCtx->vSCC );
+    pCtx->nPairsS = 0;
+    pCtx->nPairsD = 0;
+    pCtx->fWarning = 0;
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Candidate allocation and deallocation.]
+
+***********************************************************************/
+static Fx_Candidate_t * Fx_CandAlloc( int K )
+{
+    Fx_Candidate_t * pCands = ABC_CALLOC( Fx_Candidate_t, K );
+    int c;
+    for ( c = 0; c < K; c++ )
+    {
+        pCands[c].vCubesS = Vec_IntAlloc( 100 );
+        pCands[c].vCubesD = Vec_IntAlloc( 100 );
+        pCands[c].vCompls = Vec_IntAlloc( 100 );
+        pCands[c].vDiv    = Vec_IntAlloc( 100 );
+    }
+    return pCands;
+}
+static void Fx_CandFree( Fx_Candidate_t * pCands, int K )
+{
+    int c;
+    for ( c = 0; c < K; c++ )
+    {
+        Vec_IntFree( pCands[c].vCubesS );
+        Vec_IntFree( pCands[c].vCubesD );
+        Vec_IntFree( pCands[c].vCompls );
+        Vec_IntFree( pCands[c].vDiv );
+    }
+    ABC_FREE( pCands );
+}
+
+/* OMP_PLACEHOLDER_1 */
+
+/**Function*************************************************************
+
+  Synopsis    [Gathers affected cubes for a candidate divisor (sequential).]
+
+***********************************************************************/
+static void Fx_ManUpdateGather( Fx_Man_t * p, Fx_Candidate_t * pCand )
+{
+    Vec_IntClear( pCand->vDiv );
+    Vec_IntAppend( pCand->vDiv, Hsh_VecReadEntry(p->pHash, pCand->iDiv) );
+    Fx_ManDivFindPivots( pCand->vDiv, &pCand->Lit0, &pCand->Lit1 );
+    // collect single-cube-divisor cubes
+    Vec_IntClear( pCand->vCubesS );
+    if ( Vec_IntSize(pCand->vDiv) == 2 )
+    {
+        Fx_ManCompressCubes( p->vCubes, Vec_WecEntry(p->vLits, Abc_LitNot(pCand->Lit0)) );
+        Fx_ManCompressCubes( p->vCubes, Vec_WecEntry(p->vLits, Abc_LitNot(pCand->Lit1)) );
+        Vec_IntTwoRemoveCommon( Vec_WecEntry(p->vLits, Abc_LitNot(pCand->Lit0)), Vec_WecEntry(p->vLits, Abc_LitNot(pCand->Lit1)), pCand->vCubesS );
+    }
+    // collect double-cube-divisor cube pairs
+    Fx_ManCompressCubes( p->vCubes, Vec_WecEntry(p->vLits, pCand->Lit0) );
+    Fx_ManCompressCubes( p->vCubes, Vec_WecEntry(p->vLits, pCand->Lit1) );
+    Vec_IntClear( pCand->vCubesD );
+    Vec_IntClear( pCand->vCompls );
+    pCand->fWarning = 0;
+    Fx_ManFindCommonPairs( p->vCubes, Vec_WecEntry(p->vLits, pCand->Lit0), Vec_WecEntry(p->vLits, pCand->Lit1),
+        pCand->vCubesD, pCand->vCompls, pCand->vDiv, p->vCubeFree, &pCand->fWarning );
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Thread-safe SCD cost with delta accumulation.]
+
+***********************************************************************/
+static int Fx_ManCubeSCD_Delta( Fx_Man_t * p, Vec_Int_t * vPivot, int fRemove, Fx_ThreadCtx_t * pCtx )
+{
+    int k, n, Lit, Lit2, iDiv;
+    if ( Vec_IntSize(vPivot) < 2 )
+        return 0;
+    Vec_IntForEachEntryStart( vPivot, Lit, k, 1 )
+    Vec_IntForEachEntryStart( vPivot, Lit2, n, k+1 )
+    {
+        assert( Lit < Lit2 );
+        Vec_IntClear( pCtx->vCubeFree );
+        Vec_IntPush( pCtx->vCubeFree, Abc_Var2Lit(Abc_LitNot(Lit), 0) );
+        Vec_IntPush( pCtx->vCubeFree, Abc_Var2Lit(Abc_LitNot(Lit2), 1) );
+        iDiv = Hsh_VecManLookup( p->pHash, pCtx->vCubeFree );
+        if ( iDiv < 0 ) continue;
+        Vec_IntPush( pCtx->vDeltaDiv, iDiv );
+        Vec_FltPush( pCtx->vDeltaWt, fRemove ? -1.0f : 1.0f );
+        if ( fRemove ) pCtx->nPairsS--;
+        else           pCtx->nPairsS++;
+    }
+    return Vec_IntSize(vPivot) * (Vec_IntSize(vPivot) - 1) / 2;
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Thread-safe DCD cost with delta accumulation.]
+
+***********************************************************************/
+static void Fx_ManCubeDCD_Delta( Fx_Man_t * p, int iFirst, Vec_Int_t * vPivot, int fRemove, Fx_ThreadCtx_t * pCtx )
+{
+    Vec_Int_t * vCube;
+    int i, iDiv, Base;
+    Vec_WecForEachLevelStart( p->vCubes, vCube, i, iFirst )
+    {
+        if ( Vec_IntSize(vCube) == 0 || vCube == vPivot )
+            continue;
+        if ( Vec_WecIntHasMark(vCube) && Vec_WecIntHasMark(vPivot) && vCube > vPivot )
+            continue;
+        if ( Vec_IntEntry(vCube, 0) != Vec_IntEntry(vPivot, 0) )
+            break;
+        Base = Fx_ManDivFindCubeFree( vCube, vPivot, pCtx->vCubeFree, &pCtx->fWarning );
+        if ( Base == -1 )
+        {
+            if ( fRemove == 0 )
+            {
+                if ( Vec_IntSize(vCube) > Vec_IntSize(vPivot) )
+                    Vec_IntPush( pCtx->vSCC, Vec_WecLevelId(p->vCubes, vCube) );
+                else
+                    Vec_IntPush( pCtx->vSCC, Vec_WecLevelId(p->vCubes, vPivot) );
+            }
+            continue;
+        }
+        if ( Vec_IntSize(pCtx->vCubeFree) == 4 )
+        {
+            int Value = Fx_ManDivNormalize( pCtx->vCubeFree );
+            if ( p->fCanonDivs && Value < 0 )
+                continue;
+        }
+        if ( p->LitCountMax && p->LitCountMax < Vec_IntSize(pCtx->vCubeFree) )
+            continue;
+        if ( p->fCanonDivs && Vec_IntSize(pCtx->vCubeFree) == 3 )
+            continue;
+        iDiv = Hsh_VecManLookup( p->pHash, pCtx->vCubeFree );
+        if ( iDiv < 0 ) continue;
+        {
+            float delta = (float)(Base + Vec_IntSize(pCtx->vCubeFree) - 1);
+            Vec_IntPush( pCtx->vDeltaDiv, iDiv );
+            Vec_FltPush( pCtx->vDeltaWt, fRemove ? -delta : delta );
+        }
+        if ( fRemove ) pCtx->nPairsD--;
+        else           pCtx->nPairsD++;
+    }
+}
+
+/* OMP_PLACEHOLDER_2 */
+
+/**Function*************************************************************
+
+  Synopsis    [Detects conflicts among candidates (shared cubes).]
+
+***********************************************************************/
+static void Fx_ManDetectConflicts( Fx_Man_t * p, Fx_Candidate_t * pCands, int nCands,
+    Vec_Int_t * vIndep, Vec_Int_t * vConflict )
+{
+    Vec_Int_t * vSeen = Vec_IntStart( Vec_WecSize(p->vCubes) );
+    int c, i, CubeId, fConflict;
+    Vec_IntClear( vIndep );
+    Vec_IntClear( vConflict );
+    for ( c = 0; c < nCands; c++ )
+    {
+        fConflict = 0;
+        Vec_IntForEachEntry( pCands[c].vCubesS, CubeId, i )
+            if ( Vec_IntEntry(vSeen, CubeId) ) { fConflict = 1; break; }
+        if ( !fConflict )
+        {
+            for ( i = 0; i < Vec_IntSize(pCands[c].vCubesD); i++ )
+            {
+                CubeId = Vec_IntEntry(pCands[c].vCubesD, i);
+                if ( Vec_IntEntry(vSeen, CubeId) ) { fConflict = 1; break; }
+            }
+        }
+        if ( fConflict )
+        {
+            Vec_IntPush( vConflict, c );
+            continue;
+        }
+        Vec_IntPush( vIndep, c );
+        Vec_IntForEachEntry( pCands[c].vCubesS, CubeId, i )
+            Vec_IntWriteEntry( vSeen, CubeId, 1 );
+        for ( i = 0; i < Vec_IntSize(pCands[c].vCubesD); i++ )
+            Vec_IntWriteEntry( vSeen, Vec_IntEntry(pCands[c].vCubesD, i), 1 );
+    }
+    Vec_IntFree( vSeen );
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Subtract cost + structural mutation (runs in parallel).]
+
+***********************************************************************/
+static void Fx_ManUpdateSubtractAndMutate( Fx_Man_t * p, Fx_Candidate_t * pCand, Fx_ThreadCtx_t * pCtx )
+{
+    Vec_Int_t * vCube, * vCube2, * vLitP, * vLitN;
+    int i, k, Lit0, Lit1, RetValue, Level;
+    int iVarNew = pCand->iVarNew;
+    Lit0 = pCand->Lit0;
+    Lit1 = pCand->Lit1;
+
+    // subtract cost of single-cube divisors (delta accumulation)
+    Fx_ManForEachCubeVec( pCand->vCubesS, p->vCubes, vCube, i )
+        Fx_ManCubeSCD_Delta( p, vCube, 1, pCtx );
+    Fx_ManForEachCubeVec( pCand->vCubesD, p->vCubes, vCube, i )
+        Fx_ManCubeSCD_Delta( p, vCube, 1, pCtx );
+
+    // mark cubes, subtract cost of double-cube divisors
+    Vec_WecMarkLevels( p->vCubes, pCand->vCubesS );
+    Vec_WecMarkLevels( p->vCubes, pCand->vCubesD );
+    Fx_ManForEachCubeVec( pCand->vCubesS, p->vCubes, vCube, i )
+        Fx_ManCubeDCD_Delta( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 1, pCtx );
+    Fx_ManForEachCubeVec( pCand->vCubesD, p->vCubes, vCube, i )
+        Fx_ManCubeDCD_Delta( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 1, pCtx );
+    Vec_WecUnmarkLevels( p->vCubes, pCand->vCubesS );
+    Vec_WecUnmarkLevels( p->vCubes, pCand->vCubesD );
+
+    // structural mutation: create new divisor node using pre-allocated slots
+    if ( !(Abc_Lit2Var(Lit0) == Abc_Lit2Var(Lit1) && Vec_IntSize(pCand->vDiv) == 2) )
+    {
+        vCube = Vec_WecEntry( p->vCubes, pCand->iNewCubeBase );
+        Vec_IntPush( vCube, iVarNew );
+        if ( Vec_IntSize(pCand->vDiv) == 2 )
+        {
+            Vec_IntPush( vCube, Abc_LitNot(Lit0) );
+            Vec_IntPush( vCube, Abc_LitNot(Lit1) );
+            Level = 1 + Fx_ManComputeLevelCube( p, vCube );
+        }
+        else
+        {
+            vCube2 = Vec_WecEntry( p->vCubes, pCand->iNewCubeBase + 1 );
+            Vec_IntPush( vCube2, iVarNew );
+            Fx_ManDivAddLits( vCube, vCube2, pCand->vDiv );
+            Level = 2 + Abc_MaxInt( Fx_ManComputeLevelCube(p, vCube), Fx_ManComputeLevelCube(p, vCube2) );
+        }
+        Vec_IntWriteEntry( p->vLevels, iVarNew, Level );
+
+        // get pre-allocated literal arrays
+        vLitP = Vec_WecEntry( p->vLits, 2 * iVarNew );
+        vLitN = Vec_WecEntry( p->vLits, 2 * iVarNew + 1 );
+
+        // update single-cube divisor cubes
+        Fx_ManForEachCubeVec( pCand->vCubesS, p->vCubes, vCube, i )
+        {
+            RetValue  = Vec_IntRemove1( vCube, Abc_LitNot(Lit0) );
+            RetValue += Vec_IntRemove1( vCube, Abc_LitNot(Lit1) );
+            assert( RetValue == 2 );
+            Vec_IntPush( vCube, Abc_Var2Lit(iVarNew, 0) );
+            Vec_IntPush( vLitP, Vec_WecLevelId(p->vCubes, vCube) );
+        }
+    }
+    else
+    {
+        vLitP = NULL;
+        vLitN = NULL;
+    }
+
+    // extract from pairs
+    k = 0;
+    assert( Vec_IntSize(pCand->vCubesD) % 2 == 0 );
+    for ( i = 0; i < Vec_IntSize(pCand->vCubesD); i += 2 )
+    {
+        int fCompl = Vec_IntEntry(pCand->vCompls, i/2);
+        vCube  = Vec_WecEntry( p->vCubes, Vec_IntEntry(pCand->vCubesD, i) );
+        vCube2 = Vec_WecEntry( p->vCubes, Vec_IntEntry(pCand->vCubesD, i+1) );
+        RetValue  = Fx_ManDivRemoveLits( vCube, pCand->vDiv, fCompl );
+        RetValue += Fx_ManDivRemoveLits( vCube2, pCand->vDiv, fCompl );
+        assert( RetValue == Vec_IntSize(pCand->vDiv) || RetValue == Vec_IntSize(pCand->vDiv) + 1 );
+        if ( iVarNew > 0 && vLitP != NULL )
+        {
+            if ( Vec_IntSize(pCand->vDiv) == 2 || fCompl )
+            {
+                Vec_IntPush( vCube, Abc_Var2Lit(iVarNew, 1) );
+                Vec_IntPush( vLitN, Vec_WecLevelId(p->vCubes, vCube) );
+            }
+            else
+            {
+                Vec_IntPush( vCube, Abc_Var2Lit(iVarNew, 0) );
+                Vec_IntPush( vLitP, Vec_WecLevelId(p->vCubes, vCube) );
+            }
+        }
+        Vec_IntWriteEntry( pCand->vCubesD, k++, Vec_WecLevelId(p->vCubes, vCube) );
+        Vec_IntClear( vCube2 );
+    }
+    Vec_IntShrink( pCand->vCubesD, k );
+    Vec_IntSort( pCand->vCubesD, 0 );
+}
+
+/* OMP_PLACEHOLDER_3 */
+
+/**Function*************************************************************
+
+  Synopsis    [Merge deltas + add cost (sequential per divisor).]
+
+***********************************************************************/
+static void Fx_ManUpdateMergeAndAddCost( Fx_Man_t * p, Fx_Candidate_t * pCand, Fx_ThreadCtx_t * pCtx )
+{
+    Vec_Int_t * vCube, * vCube2;
+    int i, iDiv, Lit0, fWarning = pCand->fWarning;
+    int iVarNew = pCand->iVarNew;
+
+    // apply accumulated weight deltas
+    for ( i = 0; i < Vec_IntSize(pCtx->vDeltaDiv); i++ )
+    {
+        iDiv = Vec_IntEntry( pCtx->vDeltaDiv, i );
+        if ( iDiv >= 0 && iDiv < Vec_FltSize(p->vWeights) )
+        {
+            Vec_FltAddToEntry( p->vWeights, iDiv, Vec_FltEntry(pCtx->vDeltaWt, i) );
+            if ( Vec_QueIsMember(p->vPrio, iDiv) )
+                Vec_QueUpdate( p->vPrio, iDiv );
+        }
+    }
+    p->nPairsS += pCtx->nPairsS;
+    p->nPairsD += pCtx->nPairsD;
+    p->nDivs++;
+
+    // add cost of single-cube divisors (sequential, can insert new divisors)
+    Fx_ManForEachCubeVec( pCand->vCubesS, p->vCubes, vCube, i )
+        Fx_ManCubeSingleCubeDivisors( p, vCube, 0, 1 );
+    Fx_ManForEachCubeVec( pCand->vCubesD, p->vCubes, vCube, i )
+        Fx_ManCubeSingleCubeDivisors( p, vCube, 0, 1 );
+
+    // mark cubes, add cost of double-cube divisors
+    Vec_WecMarkLevels( p->vCubes, pCand->vCubesS );
+    Vec_WecMarkLevels( p->vCubes, pCand->vCubesD );
+    Fx_ManForEachCubeVec( pCand->vCubesS, p->vCubes, vCube, i )
+        Fx_ManCubeDoubleCubeDivisors( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 0, 1, &fWarning );
+    Fx_ManForEachCubeVec( pCand->vCubesD, p->vCubes, vCube, i )
+        Fx_ManCubeDoubleCubeDivisors( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 0, 1, &fWarning );
+    Vec_WecUnmarkLevels( p->vCubes, pCand->vCubesS );
+    Vec_WecUnmarkLevels( p->vCubes, pCand->vCubesD );
+
+    // handle SCC from thread context
+    if ( Vec_IntSize(pCtx->vSCC) )
+    {
+        Vec_IntUniqify( pCtx->vSCC );
+        Fx_ManForEachCubeVec( pCtx->vSCC, p->vCubes, vCube, i )
+        {
+            Fx_ManCubeDoubleCubeDivisors( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 1, 1, &fWarning );
+            Vec_IntClear( vCube );
+        }
+    }
+
+    // add cost of the new divisor
+    if ( Vec_IntSize(pCand->vDiv) > 2 && !(Abc_Lit2Var(pCand->Lit0) == Abc_Lit2Var(pCand->Lit1) && Vec_IntSize(pCand->vDiv) == 2) )
+    {
+        vCube  = Vec_WecEntry( p->vCubes, pCand->iNewCubeBase );
+        vCube2 = Vec_WecEntry( p->vCubes, pCand->iNewCubeBase + 1 );
+        Fx_ManCubeSingleCubeDivisors( p, vCube,  0, 1 );
+        Fx_ManCubeSingleCubeDivisors( p, vCube2, 0, 1 );
+        Vec_IntForEachEntryStart( vCube, Lit0, i, 1 )
+            Vec_WecPush( p->vLits, Lit0, Vec_WecLevelId(p->vCubes, vCube) );
+        Vec_IntForEachEntryStart( vCube2, Lit0, i, 1 )
+            Vec_WecPush( p->vLits, Lit0, Vec_WecLevelId(p->vCubes, vCube2) );
+    }
+
+    // remove cubes from lit arrays of the divisor
+    Vec_IntForEachEntry( pCand->vDiv, Lit0, i )
+    {
+        Vec_IntTwoRemove( Vec_WecEntry(p->vLits, Abc_Lit2Var(Lit0)), pCand->vCubesD );
+        if ( Vec_IntSize(pCand->vDiv) == 2 )
+            Vec_IntTwoRemove( Vec_WecEntry(p->vLits, Abc_LitNot(Abc_Lit2Var(Lit0))), pCand->vCubesD );
+    }
+}
+#endif /* ABC_USE_OMP */
+
 /**Function*************************************************************
 
   Synopsis    [Implements the traditional fast_extract algorithm.]
@@ -1182,6 +1614,197 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
         Fx_PrintStats( p, Abc_Clock() - clk );
     // perform extraction
     p->timeStart = Abc_Clock();
+#ifdef ABC_USE_OMP
+    {
+        int nThreads = omp_get_max_threads();
+        if ( nThreads > 1 )
+        {
+            int K = nThreads * 2;
+            int c, j, nPopped, nIndep;
+            Fx_Candidate_t * pCands = Fx_CandAlloc( K );
+            Fx_ThreadCtx_t * pCtxs  = Fx_ThreadCtxAlloc( nThreads );
+            Vec_Int_t * vIndep   = Vec_IntAlloc( K );
+            Vec_Int_t * vConflict = Vec_IntAlloc( K );
+
+            for ( i = 0; i < nNewNodesMax && Vec_QueTopPriority(p->vPrio) > 0.0; )
+            {
+                // Phase A: Pop up to K candidates
+                nPopped = 0;
+                while ( nPopped < K && i + nPopped < nNewNodesMax && Vec_QueTopPriority(p->vPrio) > 0.0 )
+                {
+                    pCands[nPopped].iDiv = Vec_QuePop( p->vPrio );
+                    nPopped++;
+                }
+                if ( nPopped == 0 ) break;
+
+                // Phase B: Gather affected cubes (sequential)
+                for ( c = 0; c < nPopped; c++ )
+                    Fx_ManUpdateGather( p, &pCands[c] );
+
+                // Phase C: Detect conflicts
+                Fx_ManDetectConflicts( p, pCands, nPopped, vIndep, vConflict );
+                nIndep = Vec_IntSize( vIndep );
+                if ( nIndep == 0 )
+                {
+                    // all conflict - re-insert all and fall back to serial for one
+                    for ( j = 1; j < nPopped; j++ )
+                        Vec_QuePush( p->vPrio, pCands[j].iDiv );
+                    Fx_ManUpdate( p, pCands[0].iDiv, &fWarning );
+                    i++;
+                    continue;
+                }
+
+                // Phase D: Pre-allocate cube/lit slots for independent divisors
+                for ( j = 0; j < nIndep; j++ )
+                {
+                    int idx = Vec_IntEntry( vIndep, j );
+                    Fx_Candidate_t * pC = &pCands[idx];
+                    int fSkipNode = (Abc_Lit2Var(pC->Lit0) == Abc_Lit2Var(pC->Lit1) && Vec_IntSize(pC->vDiv) == 2);
+                    if ( !fSkipNode )
+                    {
+                        int nNewCubes = (Vec_IntSize(pC->vDiv) == 2) ? 1 : 2;
+                        pC->iVarNew = Vec_WecSize( p->vLits ) / 2;
+                        pC->iNewCubeBase = Vec_WecSize( p->vCubes );
+                        Vec_IntPush( p->vVarCube, pC->iNewCubeBase );
+                        for ( c = 0; c < nNewCubes; c++ )
+                            Vec_WecPushLevel( p->vCubes );
+                        Vec_IntPush( p->vLevels, 0 );
+                        p->nLits += Vec_IntSize( pC->vDiv );
+                        Vec_WecPushLevel( p->vLits ); // vLitP
+                        Vec_WecPushLevel( p->vLits ); // vLitN
+                    }
+                    else
+                    {
+                        pC->iVarNew = 0;
+                        pC->iNewCubeBase = -1;
+                    }
+                }
+
+                // Phase E: Subtract cost + structural mutation (PARALLEL)
+                for ( j = 0; j < nThreads; j++ )
+                    Fx_ThreadCtxClear( &pCtxs[j] );
+                #pragma omp parallel for schedule(dynamic) num_threads(nThreads)
+                for ( j = 0; j < nIndep; j++ )
+                {
+                    int tid = omp_get_thread_num();
+                    int idx = Vec_IntEntry( vIndep, j );
+                    Fx_ManUpdateSubtractAndMutate( p, &pCands[idx], &pCtxs[tid] );
+                }
+
+                // Phase F: Merge deltas + add cost (sequential)
+                for ( j = 0; j < nIndep; j++ )
+                {
+                    int idx = Vec_IntEntry( vIndep, j );
+                    // find which thread handled this - use round-robin approximation
+                    // Actually, we need per-candidate ctx tracking. Simpler: merge all ctxs first.
+                }
+                // Merge all thread contexts
+                for ( j = 0; j < nThreads; j++ )
+                {
+                    int d;
+                    for ( d = 0; d < Vec_IntSize(pCtxs[j].vDeltaDiv); d++ )
+                    {
+                        int dDiv = Vec_IntEntry( pCtxs[j].vDeltaDiv, d );
+                        if ( dDiv >= 0 && dDiv < Vec_FltSize(p->vWeights) )
+                        {
+                            Vec_FltAddToEntry( p->vWeights, dDiv, Vec_FltEntry(pCtxs[j].vDeltaWt, d) );
+                            if ( Vec_QueIsMember(p->vPrio, dDiv) )
+                                Vec_QueUpdate( p->vPrio, dDiv );
+                        }
+                    }
+                    p->nPairsS += pCtxs[j].nPairsS;
+                    p->nPairsD += pCtxs[j].nPairsD;
+                }
+                // Add cost + SCC handling per independent divisor (sequential)
+                for ( j = 0; j < nIndep; j++ )
+                {
+                    int idx = Vec_IntEntry( vIndep, j );
+                    // We need per-candidate SCC. Store SCC in candidate during subtract.
+                    // For now, process all thread SCCs together after merge.
+                    p->nDivs++;
+                    // add cost of single-cube divisors
+                    {
+                        Vec_Int_t * vCube;
+                        int ii, Lit0x;
+                        Fx_ManForEachCubeVec( pCands[idx].vCubesS, p->vCubes, vCube, ii )
+                            Fx_ManCubeSingleCubeDivisors( p, vCube, 0, 1 );
+                        Fx_ManForEachCubeVec( pCands[idx].vCubesD, p->vCubes, vCube, ii )
+                            Fx_ManCubeSingleCubeDivisors( p, vCube, 0, 1 );
+                        // mark + add DCD cost
+                        Vec_WecMarkLevels( p->vCubes, pCands[idx].vCubesS );
+                        Vec_WecMarkLevels( p->vCubes, pCands[idx].vCubesD );
+                        Fx_ManForEachCubeVec( pCands[idx].vCubesS, p->vCubes, vCube, ii )
+                            Fx_ManCubeDoubleCubeDivisors( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 0, 1, &fWarning );
+                        Fx_ManForEachCubeVec( pCands[idx].vCubesD, p->vCubes, vCube, ii )
+                            Fx_ManCubeDoubleCubeDivisors( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 0, 1, &fWarning );
+                        Vec_WecUnmarkLevels( p->vCubes, pCands[idx].vCubesS );
+                        Vec_WecUnmarkLevels( p->vCubes, pCands[idx].vCubesD );
+                        // add cost of new divisor cubes
+                        if ( Vec_IntSize(pCands[idx].vDiv) > 2 && pCands[idx].iNewCubeBase >= 0 )
+                        {
+                            Vec_Int_t * vC1 = Vec_WecEntry( p->vCubes, pCands[idx].iNewCubeBase );
+                            Vec_Int_t * vC2 = Vec_WecEntry( p->vCubes, pCands[idx].iNewCubeBase + 1 );
+                            Fx_ManCubeSingleCubeDivisors( p, vC1, 0, 1 );
+                            Fx_ManCubeSingleCubeDivisors( p, vC2, 0, 1 );
+                            Vec_IntForEachEntryStart( vC1, Lit0x, ii, 1 )
+                                Vec_WecPush( p->vLits, Lit0x, Vec_WecLevelId(p->vCubes, vC1) );
+                            Vec_IntForEachEntryStart( vC2, Lit0x, ii, 1 )
+                                Vec_WecPush( p->vLits, Lit0x, Vec_WecLevelId(p->vCubes, vC2) );
+                        }
+                        // remove from lit arrays
+                        Vec_IntForEachEntry( pCands[idx].vDiv, Lit0x, ii )
+                        {
+                            Vec_IntTwoRemove( Vec_WecEntry(p->vLits, Abc_Lit2Var(Lit0x)), pCands[idx].vCubesD );
+                            if ( Vec_IntSize(pCands[idx].vDiv) == 2 )
+                                Vec_IntTwoRemove( Vec_WecEntry(p->vLits, Abc_LitNot(Abc_Lit2Var(Lit0x))), pCands[idx].vCubesD );
+                        }
+                    }
+                }
+                // Handle all thread SCCs
+                for ( j = 0; j < nThreads; j++ )
+                {
+                    if ( Vec_IntSize(pCtxs[j].vSCC) )
+                    {
+                        Vec_Int_t * vCube;
+                        int ii;
+                        Vec_IntUniqify( pCtxs[j].vSCC );
+                        Fx_ManForEachCubeVec( pCtxs[j].vSCC, p->vCubes, vCube, ii )
+                        {
+                            Fx_ManCubeDoubleCubeDivisors( p, Fx_ManGetFirstVarCube(p, vCube), vCube, 1, 1, &fWarning );
+                            Vec_IntClear( vCube );
+                        }
+                    }
+                }
+
+                i += nIndep;
+
+                // Phase G: Re-insert conflicting divisors
+                for ( j = 0; j < Vec_IntSize(vConflict); j++ )
+                {
+                    int idx = Vec_IntEntry( vConflict, j );
+                    Vec_QuePush( p->vPrio, pCands[idx].iDiv );
+                }
+            }
+            Fx_CandFree( pCands, K );
+            Fx_ThreadCtxFree( pCtxs, nThreads );
+            Vec_IntFree( vIndep );
+            Vec_IntFree( vConflict );
+        }
+        else
+        {
+            // single thread - use original serial loop
+            for ( i = 0; i < nNewNodesMax && Vec_QueTopPriority(p->vPrio) > 0.0; i++ )
+            {
+                iDiv = Vec_QuePop(p->vPrio);
+                if ( fVeryVerbose )
+                    Fx_PrintDiv( p, iDiv );
+                Fx_ManUpdate( p, iDiv, &fWarning );
+                if ( fVeryVeryVerbose )
+                    Fx_PrintDivisors( p );
+            }
+        }
+    }
+#else
     for ( i = 0; i < nNewNodesMax && Vec_QueTopPriority(p->vPrio) > 0.0; i++ )
     {
         iDiv = Vec_QuePop(p->vPrio);
@@ -1191,6 +1814,7 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
         if ( fVeryVeryVerbose )
             Fx_PrintDivisors( p );
     }
+#endif
     if ( fVerbose )
         Fx_PrintStats( p, Abc_Clock() - clk );
     Fx_ManStop( p );

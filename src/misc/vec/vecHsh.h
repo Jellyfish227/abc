@@ -521,6 +521,16 @@ static inline int Hsh_VecManHash( Vec_Int_t * vVec, int nTableSize )
         Key += (unsigned)Entry * s_Primes[i % 7];
     return (int)(Key % nTableSize);
 }
+static inline int Hsh_VecManLookup( Hsh_VecMan_t * p, Vec_Int_t * vVec )
+{
+    Hsh_VecObj_t * pObj;
+    int * pPlace;
+    pPlace = Vec_IntEntryP( p->vTable, Hsh_VecManHash(vVec, Vec_IntSize(p->vTable)) );
+    for ( ; (pObj = Hsh_VecObj(p, *pPlace)); pPlace = &pObj->iNext )
+        if ( pObj->nSize == Vec_IntSize(vVec) && !memcmp( pObj->pArray, Vec_IntArray(vVec), sizeof(int) * (size_t)pObj->nSize ) )
+            return *pPlace;
+    return -1;
+}
 static inline int Hsh_VecManAdd( Hsh_VecMan_t * p, Vec_Int_t * vVec )
 {
     Hsh_VecObj_t * pObj;
