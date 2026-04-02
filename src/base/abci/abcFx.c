@@ -1374,13 +1374,15 @@ static void Fx_ManCubeDCD_Delta( Fx_Man_t * p, int iFirst, Vec_Int_t * vPivot, i
 static void Fx_ManDetectConflicts( Fx_Man_t * p, Fx_Candidate_t * pCands, int nCands,
     Vec_Int_t * vIndep, Vec_Int_t * vConflict )
 {
-    Vec_Int_t * vSeen = Vec_IntStart( Vec_WecSize(p->vCubes) );
-    int c, i, CubeId, fConflict;
+    Vec_Int_t * vSeen    = Vec_IntStart( Vec_WecSize(p->vCubes) );
+    Vec_Int_t * vSeenVarGrp = Vec_IntStart( p->nVars );
+    int c, i, CubeId, VarGrp, fConflict;
     Vec_IntClear( vIndep );
     Vec_IntClear( vConflict );
     for ( c = 0; c < nCands; c++ )
     {
         fConflict = 0;
+        // check shared cube IDs
         Vec_IntForEachEntry( pCands[c].vCubesS, CubeId, i )
             if ( Vec_IntEntry(vSeen, CubeId) ) { fConflict = 1; break; }
         if ( !fConflict )
@@ -1391,18 +1393,51 @@ static void Fx_ManDetectConflicts( Fx_Man_t * p, Fx_Candidate_t * pCands, int nC
                 if ( Vec_IntEntry(vSeen, CubeId) ) { fConflict = 1; break; }
             }
         }
+        // check shared variable groups (node IDs): Fx_ManCubeDoubleCubeDivisors
+        // iterates the entire variable group, so two candidates with disjoint cube
+        // IDs but overlapping variable groups will corrupt each other's add-cost phase
+        if ( !fConflict )
+        {
+            Vec_IntForEachEntry( pCands[c].vCubesS, CubeId, i )
+            {
+                VarGrp = Vec_IntEntry( Vec_WecEntry(p->vCubes, CubeId), 0 );
+                if ( VarGrp < p->nVars && Vec_IntEntry(vSeenVarGrp, VarGrp) ) { fConflict = 1; break; }
+            }
+        }
+        if ( !fConflict )
+        {
+            for ( i = 0; i < Vec_IntSize(pCands[c].vCubesD); i++ )
+            {
+                CubeId = Vec_IntEntry(pCands[c].vCubesD, i);
+                VarGrp = Vec_IntEntry( Vec_WecEntry(p->vCubes, CubeId), 0 );
+                if ( VarGrp < p->nVars && Vec_IntEntry(vSeenVarGrp, VarGrp) ) { fConflict = 1; break; }
+            }
+        }
         if ( fConflict )
         {
             Vec_IntPush( vConflict, c );
             continue;
         }
         Vec_IntPush( vIndep, c );
+        // mark cube IDs and variable groups as claimed
         Vec_IntForEachEntry( pCands[c].vCubesS, CubeId, i )
+        {
             Vec_IntWriteEntry( vSeen, CubeId, 1 );
+            VarGrp = Vec_IntEntry( Vec_WecEntry(p->vCubes, CubeId), 0 );
+            if ( VarGrp < p->nVars )
+                Vec_IntWriteEntry( vSeenVarGrp, VarGrp, 1 );
+        }
         for ( i = 0; i < Vec_IntSize(pCands[c].vCubesD); i++ )
-            Vec_IntWriteEntry( vSeen, Vec_IntEntry(pCands[c].vCubesD, i), 1 );
+        {
+            CubeId = Vec_IntEntry(pCands[c].vCubesD, i);
+            Vec_IntWriteEntry( vSeen, CubeId, 1 );
+            VarGrp = Vec_IntEntry( Vec_WecEntry(p->vCubes, CubeId), 0 );
+            if ( VarGrp < p->nVars )
+                Vec_IntWriteEntry( vSeenVarGrp, VarGrp, 1 );
+        }
     }
     Vec_IntFree( vSeen );
+    Vec_IntFree( vSeenVarGrp );
 }
 
 /**Function*************************************************************
