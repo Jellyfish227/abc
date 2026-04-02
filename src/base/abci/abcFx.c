@@ -23,7 +23,7 @@
 #include "misc/vec/vecQue.h"
 #include "misc/vec/vecHsh.h"
 #include "opt/fxch/Fxch.h"
-#ifdef ABC_USE_OMP
+#ifdef _OPENMP
 #include <omp.h>
 #endif
 
@@ -122,7 +122,7 @@ struct Fx_Man_t_
 
 static inline int Fx_ManGetFirstVarCube( Fx_Man_t * p, Vec_Int_t * vCube ) { return Vec_IntEntry( p->vVarCube, Vec_IntEntry(vCube, 0) ); }
 
-#ifdef ABC_USE_OMP
+#ifdef _OPENMP
 // Per-thread context for parallel batch extraction
 typedef struct Fx_ThreadCtx_t_ Fx_ThreadCtx_t;
 struct Fx_ThreadCtx_t_
@@ -1184,7 +1184,7 @@ ExtractFromPairs:
 
 }
 
-#ifdef ABC_USE_OMP
+#ifdef _OPENMP
 /**Function*************************************************************
 
   Synopsis    [Thread context allocation and deallocation.]
@@ -1581,7 +1581,7 @@ static void Fx_ManUpdateMergeAndAddCost( Fx_Man_t * p, Fx_Candidate_t * pCand, F
             Vec_IntTwoRemove( Vec_WecEntry(p->vLits, Abc_LitNot(Abc_Lit2Var(Lit0))), pCand->vCubesD );
     }
 }
-#endif /* ABC_USE_OMP */
+#endif /* _OPENMP */
 
 /**Function*************************************************************
 
@@ -1615,7 +1615,7 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
         Fx_PrintStats( p, Abc_Clock() - clk );
     // perform extraction
     p->timeStart = Abc_Clock();
-#ifdef ABC_USE_OMP
+#ifdef _OPENMP
     {
         int nThreads = omp_get_max_threads();
         if ( nThreads > 1 )
