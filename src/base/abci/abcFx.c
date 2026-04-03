@@ -319,6 +319,19 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
     }
     // collect information about the covers
     vCubes = Abc_NtkFxRetrieve( pNtk );
+
+    // TODO: write function here that partitions vCubes into chunks (make sure each chunk is given a corresponding ID)
+
+    // TODO: call the fast extract procedure for each chunk
+    //  NOTE: we need to know the number of NEW nodes created to finish FX, denoted by new_node_count
+
+    // TODO: write a function that combines the chunks (MUST be sorted by chunk ID or else Abc_NtkFxInsert will fail)
+    // (i.e. we must await every chunk to complete processing before combining them)
+    // combination pseudocode:
+    // bottleneck is the largest chunk, FX algorithm largely unchanged
+
+    // TODO: call Abc_NtkFxInsert with combined vCubes
+
     // call the fast extract procedure
     if ( Fx_FastExtract( vCubes, Abc_NtkObjNumMax(pNtk), nNewNodesMax, LitCountMax, fCanonDivs, fVerbose, fVeryVerbose ) > 0 )
     {
