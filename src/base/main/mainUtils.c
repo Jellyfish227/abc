@@ -22,8 +22,8 @@
 #include "mainInt.h"
 
 #ifdef ABC_USE_READLINE
-#include "../../../lib/readline-8.3/readline.h"
-#include "../../../lib/readline-8.3/history.h"
+#include <readline/readline.h>
+#include <readline/history.h>
 #endif
 
 ABC_NAMESPACE_IMPL_START
