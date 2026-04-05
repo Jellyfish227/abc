@@ -536,7 +536,7 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
                     tid, nthreads, j, Vec_WecSize(vParts[j]) );
             fflush( stdout );
             Fx_FastExtract( vParts[j], pLocalObjIdMax[j] + 1,
-                            nNewNodesMax, LitCountMax, 0, 0, 0 );
+                            nNewNodesMax, LitCountMax, 0, fVerbose, fVeryVerbose );
             printf( "[OMP] thread %d/%d finished partition %d in %.2f sec\n",
                     tid, nthreads, j,
                     (float)(Abc_Clock() - tPartStart) / CLOCKS_PER_SEC );
