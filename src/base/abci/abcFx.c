@@ -501,17 +501,22 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
         return 0;
     }
 
+    abctime tTotal = Abc_Clock();
+    abctime tPhase;
+
     /* collect information about the covers */
     vCubes = Abc_NtkFxRetrieve( pNtk );
 
     /* determine number of partitions from OMP_NUM_THREADS */
     nParts = omp_get_max_threads();
     if ( nParts < 1 ) nParts = 1;
+    printf( "[FX] Starting parallel FX with %d partition(s)\n", nParts );
 
     /* compute global ObjId ceiling (max across entire network before extraction) */
     globalObjIdMax = Abc_NtkObjNumMax( pNtk ) - 1;
 
     /* --- Phase 1: partition vCubes into deep-copied chunks --- */
+    tPhase = Abc_Clock();
     pLocalObjIdMax = ABC_ALLOC( int, nParts );
     vParts = Fx_PartitionCubes( vCubes, &nParts, pLocalObjIdMax );
     if ( vParts == NULL || nParts == 0 )
@@ -521,21 +526,39 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
         printf( "Warning: The network has not been changed by \"fx\".\n" );
         return 0;
     }
+    printf( "[FX] Phase 1 (partition): %.2f sec  (%d partitions)\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, nParts );
 
     /* free original vCubes — we work entirely on the per-partition copies */
     Vec_WecFree( vCubes );
     vCubes = NULL;
 
     /* --- Phase 2: run Fx_FastExtract on each partition in parallel --- */
-    #pragma omp parallel for schedule(dynamic, 1) num_threads(nParts)
-    for ( j = 0; j < nParts; j++ )
     {
-        Fx_FastExtract( vParts[j], pLocalObjIdMax[j] + 1,
-                        nNewNodesMax, LitCountMax, fCanonDivs, 0, 0 );
+        abctime tPhase2Start = Abc_Clock();
+        #pragma omp parallel for schedule(dynamic, 1) num_threads(nParts)
+        for ( j = 0; j < nParts; j++ )
+        {
+            int tid = omp_get_thread_num();
+            int nthreads = omp_get_num_threads();
+            abctime tPartStart = Abc_Clock();
+            printf( "[OMP] thread %d/%d starting partition %d (cubes=%d)\n",
+                    tid, nthreads, j, Vec_WecSize(vParts[j]) );
+            fflush( stdout );
+            Fx_FastExtract( vParts[j], pLocalObjIdMax[j] + 1,
+                            nNewNodesMax, LitCountMax, fCanonDivs, 0, 0 );
+            printf( "[OMP] thread %d/%d finished partition %d in %.2f sec\n",
+                    tid, nthreads, j,
+                    (float)(Abc_Clock() - tPartStart) / CLOCKS_PER_SEC );
+            fflush( stdout );
+        }
+        /* implicit barrier at end of parallel region */
+        printf( "[FX] Phase 2 (parallel extraction): %.2f sec\n",
+                (float)(Abc_Clock() - tPhase2Start) / CLOCKS_PER_SEC );
     }
-    /* implicit barrier at end of parallel region */
 
     /* --- Phase 3: count new nodes per partition, then prefix-sum --- */
+    tPhase = Abc_Clock();
     pNewNodeCounts = ABC_CALLOC( int, nParts );
     for ( j = 0; j < nParts; j++ )
     {
@@ -550,14 +573,20 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
     pOffsets[0] = globalObjIdMax + 1;
     for ( j = 1; j < nParts; j++ )
         pOffsets[j] = pOffsets[j-1] + pNewNodeCounts[j-1];
+    printf( "[FX] Phase 3 (count+prefix-sum): %.2f sec\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
 
     /* --- Phase 4: remap new-node IDs to global range (parallel) --- */
+    tPhase = Abc_Clock();
     #pragma omp parallel for schedule(static) num_threads(nParts)
     for ( j = 0; j < nParts; j++ )
         Fx_RemapNewNodes( vParts[j], pLocalObjIdMax[j], pOffsets[j] );
     /* implicit barrier */
+    printf( "[FX] Phase 4 (remap): %.2f sec\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
 
     /* --- Phase 5: merge into a single sorted vCubes --- */
+    tPhase = Abc_Clock();
     anyChanged = 0;
     for ( j = 0; j < nParts; j++ )
         if ( pNewNodeCounts[j] > 0 )
@@ -573,6 +602,10 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
     }
     else
         printf( "Warning: The network has not been changed by \"fx\".\n" );
+    printf( "[FX] Phase 5 (merge+insert): %.2f sec\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+    printf( "[FX] Total wall time: %.2f sec\n",
+            (float)(Abc_Clock() - tTotal) / CLOCKS_PER_SEC );
 
     /* cleanup */
     for ( j = 0; j < nParts; j++ )
@@ -1420,18 +1453,28 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
     int i, iDiv, fWarning = 0;
     Fx_Man_t * p;
     abctime clk = Abc_Clock();
+    abctime tPhase;
     // initialize the data-structure
     p = Fx_ManStart( vCubes );
     p->LitCountMax = LitCountMax;
     p->fCanonDivs = fCanonDivs;
+    tPhase = Abc_Clock();
     Fx_ManCreateLiterals( p, ObjIdMax );
     Fx_ManComputeLevel( p );
+    printf( "[FX tid=%d]   setup literals+level: %.2f sec\n",
+            omp_get_thread_num(),
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+    tPhase = Abc_Clock();
     Fx_ManCreateDivisors( p );
+    printf( "[FX tid=%d]   create divisors: %.2f sec\n",
+            omp_get_thread_num(),
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
     if ( fVeryVerbose )
         Fx_PrintDivisors( p );
     if ( fVerbose )
         Fx_PrintStats( p, Abc_Clock() - clk );
     // perform extraction
+    tPhase = Abc_Clock();
     p->timeStart = Abc_Clock();
     for ( i = 0; i < nNewNodesMax && Vec_QueTopPriority(p->vPrio) > 0.0; i++ )
     {
@@ -1442,6 +1485,9 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
         if ( fVeryVeryVerbose )
             Fx_PrintDivisors( p );
     }
+    printf( "[FX tid=%d]   extraction loop (%d iters): %.2f sec\n",
+            omp_get_thread_num(), i,
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
     if ( fVerbose )
         Fx_PrintStats( p, Abc_Clock() - clk );
     Fx_ManStop( p );
