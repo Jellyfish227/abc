@@ -725,6 +725,7 @@ static void Fx_PrintStats( Fx_Man_t * p, abctime clk )
     printf( "Divs+ =%8d  ", Vec_QueSize(p->vPrio) );
     printf( "Compl =%8d  ", p->nDivMux[1] );
     printf( "Extr  =%7d  ", p->nDivs );
+    printf( "nLits =%d   ", p->nLits);
     Abc_PrintTime( 1, "Time", clk );
 }
 
