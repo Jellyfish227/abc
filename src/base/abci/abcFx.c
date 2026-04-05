@@ -23,6 +23,7 @@
 #include "misc/vec/vecQue.h"
 #include "misc/vec/vecHsh.h"
 #include "opt/fxch/Fxch.h"
+#include <omp.h>
 
 ABC_NAMESPACE_IMPL_START
 
@@ -297,6 +298,184 @@ int Abc_NtkFxCheck( Abc_Ntk_t * pNtk )
 
 /**Function*************************************************************
 
+  Synopsis    [Partitions vCubes into nParts independent chunks.]
+
+  Description [Splits at node boundaries (never splits cubes of the same
+  node). Each returned Vec_Wec_t* is a deep copy. *pnParts is updated to
+  the actual number of partitions (clamped to the number of unique nodes).
+  pLocalObjIdMax[j] is set to the highest original ObjId seen in partition
+  j. The caller owns all returned Vec_Wec_t* objects and must free them.]
+
+  SideEffects []
+
+  SeeAlso     []
+
+***********************************************************************/
+static Vec_Wec_t ** Fx_PartitionCubes( Vec_Wec_t * vCubes, int * pnParts, int * pLocalObjIdMax )
+{
+    Vec_Wec_t ** vParts;
+    Vec_Int_t * vCube, * vDst;
+    int i, j, nCubes, iNode, iCurNode, iPartNode;
+    int * pNodeStarts; /* pNodeStarts[n] = first cube index of the n-th unique node */
+    int nUniqueNodes = 0;
+    int nParts = *pnParts;
+
+    nCubes = Vec_WecSize( vCubes );
+    if ( nCubes == 0 || nParts <= 0 )
+    {
+        *pnParts = 0;
+        return NULL;
+    }
+
+    /* count unique nodes and record the start cube index of each */
+    pNodeStarts = ABC_ALLOC( int, nCubes + 1 ); /* upper bound */
+    iCurNode = -1;
+    for ( i = 0; i < nCubes; i++ )
+    {
+        iNode = Vec_IntEntry( Vec_WecEntry(vCubes, i), 0 );
+        if ( iNode != iCurNode )
+        {
+            pNodeStarts[nUniqueNodes++] = i;
+            iCurNode = iNode;
+        }
+    }
+    pNodeStarts[nUniqueNodes] = nCubes; /* sentinel */
+
+    /* clamp nParts to available nodes */
+    if ( nParts > nUniqueNodes )
+        nParts = nUniqueNodes;
+    *pnParts = nParts;
+
+    /* allocate partition array */
+    vParts = ABC_ALLOC( Vec_Wec_t *, nParts );
+    for ( j = 0; j < nParts; j++ )
+    {
+        vParts[j] = Vec_WecAlloc( nCubes / nParts + 4 );
+        pLocalObjIdMax[j] = 0;
+    }
+
+    /* assign nodes round-robin across partitions and deep-copy their cubes */
+    for ( iNode = 0; iNode < nUniqueNodes; iNode++ )
+    {
+        j = iNode % nParts;
+        iPartNode = iNode;
+        /* copy all cubes of this node into partition j */
+        for ( i = pNodeStarts[iPartNode]; i < pNodeStarts[iPartNode + 1]; i++ )
+        {
+            vCube = Vec_WecEntry( vCubes, i );
+            vDst  = Vec_WecPushLevel( vParts[j] );
+            Vec_IntAppend( vDst, vCube );
+            /* track max ObjId for this partition */
+            if ( Vec_IntEntry(vCube, 0) > pLocalObjIdMax[j] )
+                pLocalObjIdMax[j] = Vec_IntEntry(vCube, 0);
+        }
+    }
+
+    ABC_FREE( pNodeStarts );
+    return vParts;
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Remaps new-node ObjIds in one partition to global range.]
+
+  Description [Any cube whose cube[0] > localObjIdMax was created during
+  extraction. Its local ID (localObjIdMax+1, localObjIdMax+2, ...) is
+  translated to (globalOffset, globalOffset+1, ...). Literal fields
+  (cube[k>=1] = 2*ObjId + compl) are remapped the same way whenever the
+  embedded ObjId exceeds localObjIdMax.]
+
+  SideEffects []
+
+  SeeAlso     []
+
+***********************************************************************/
+static void Fx_RemapNewNodes( Vec_Wec_t * vPart, int localObjIdMax, int globalOffset )
+{
+    Vec_Int_t * vCube;
+    int i, k, lit, oldVar, newVar;
+    Vec_WecForEachLevel( vPart, vCube, i )
+    {
+        if ( Vec_IntSize(vCube) == 0 )
+            continue;
+        /* remap node-owner field */
+        if ( Vec_IntEntry(vCube, 0) > localObjIdMax )
+        {
+            newVar = globalOffset + (Vec_IntEntry(vCube, 0) - (localObjIdMax + 1));
+            Vec_IntWriteEntry( vCube, 0, newVar );
+        }
+        /* remap literal fields */
+        for ( k = 1; k < Vec_IntSize(vCube); k++ )
+        {
+            lit = Vec_IntEntry( vCube, k );
+            oldVar = Abc_Lit2Var( lit );
+            if ( oldVar > localObjIdMax )
+            {
+                newVar = globalOffset + (oldVar - (localObjIdMax + 1));
+                Vec_IntWriteEntry( vCube, k, Abc_Var2Lit(newVar, Abc_LitIsCompl(lit)) );
+            }
+        }
+    }
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Merges per-partition vCubes into one sorted Vec_Wec_t.]
+
+  Description [First concatenates all original cubes (cube[0] <=
+  localObjIdMax[j]) from each partition in order, then appends all new
+  node cubes (cube[0] > localObjIdMax[j]) from each partition in order.
+  After ID remapping the new nodes all exceed globalObjIdMax, so the
+  result is globally sorted by ObjId as required by Abc_NtkFxInsert.]
+
+  SideEffects []
+
+  SeeAlso     []
+
+***********************************************************************/
+static Vec_Wec_t * Fx_MergeCubes( Vec_Wec_t ** vParts, int nParts, int * pLocalObjIdMax )
+{
+    Vec_Wec_t * vMerged;
+    Vec_Int_t * vCube, * vDst;
+    int j, i;
+
+    vMerged = Vec_WecAlloc( 1024 );
+
+    /* pass 1: original cubes (ObjId <= localObjIdMax[j]) in partition order */
+    for ( j = 0; j < nParts; j++ )
+    {
+        Vec_WecForEachLevel( vParts[j], vCube, i )
+        {
+            if ( Vec_IntSize(vCube) == 0 )
+                continue;
+            if ( Vec_IntEntry(vCube, 0) <= pLocalObjIdMax[j] )
+            {
+                vDst = Vec_WecPushLevel( vMerged );
+                Vec_IntAppend( vDst, vCube );
+            }
+        }
+    }
+
+    /* pass 2: new node cubes (ObjId > localObjIdMax[j], already remapped) */
+    for ( j = 0; j < nParts; j++ )
+    {
+        Vec_WecForEachLevel( vParts[j], vCube, i )
+        {
+            if ( Vec_IntSize(vCube) == 0 )
+                continue;
+            if ( Vec_IntEntry(vCube, 0) > pLocalObjIdMax[j] )
+            {
+                vDst = Vec_WecPushLevel( vMerged );
+                Vec_IntAppend( vDst, vCube );
+            }
+        }
+    }
+
+    return vMerged;
+}
+
+/**Function*************************************************************
+
   Synopsis    []
 
   Description []
@@ -309,43 +488,101 @@ int Abc_NtkFxCheck( Abc_Ntk_t * pNtk )
 int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose )
 {
     extern int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose );
-    Vec_Wec_t * vCubes;
+    Vec_Wec_t * vCubes, * vMerged;
+    Vec_Wec_t ** vParts;
+    Vec_Int_t * vCube;
+    int * pLocalObjIdMax, * pNewNodeCounts, * pOffsets;
+    int nParts, globalObjIdMax, j, i, anyChanged;
+
     assert( Abc_NtkIsSopLogic(pNtk) );
-    // check unique fanins
     if ( !Abc_NtkFxCheck(pNtk) )
     {
         printf( "Abc_NtkFastExtract: Nodes have duplicated fanins. FX is not performed.\n" );
         return 0;
     }
-    // collect information about the covers
+
+    /* collect information about the covers */
     vCubes = Abc_NtkFxRetrieve( pNtk );
 
-    // TODO: write function here that partitions vCubes into chunks (make sure each chunk is given a corresponding ID)
+    /* determine number of partitions from OMP_NUM_THREADS */
+    nParts = omp_get_max_threads();
+    if ( nParts < 1 ) nParts = 1;
 
-    // TODO: call the fast extract procedure for each chunk
-    //  NOTE: we need to know the number of NEW nodes created to finish FX, denoted by new_node_count
+    /* compute global ObjId ceiling (max across entire network before extraction) */
+    globalObjIdMax = Abc_NtkObjNumMax( pNtk ) - 1;
 
-    // TODO: write a function that combines the chunks (MUST be sorted by chunk ID or else Abc_NtkFxInsert will fail)
-    // (i.e. we must await every chunk to complete processing before combining them)
-    // combination pseudocode:
-    // bottleneck is the largest chunk, FX algorithm largely unchanged
-
-    // TODO: call Abc_NtkFxInsert with combined vCubes
-
-    // call the fast extract procedure
-    if ( Fx_FastExtract( vCubes, Abc_NtkObjNumMax(pNtk), nNewNodesMax, LitCountMax, fCanonDivs, fVerbose, fVeryVerbose ) > 0 )
+    /* --- Phase 1: partition vCubes into deep-copied chunks --- */
+    pLocalObjIdMax = ABC_ALLOC( int, nParts );
+    vParts = Fx_PartitionCubes( vCubes, &nParts, pLocalObjIdMax );
+    if ( vParts == NULL || nParts == 0 )
     {
-        // update the network
-        Abc_NtkFxInsert( pNtk, vCubes );
+        ABC_FREE( pLocalObjIdMax );
         Vec_WecFree( vCubes );
+        printf( "Warning: The network has not been changed by \"fx\".\n" );
+        return 0;
+    }
+
+    /* free original vCubes — we work entirely on the per-partition copies */
+    Vec_WecFree( vCubes );
+    vCubes = NULL;
+
+    /* --- Phase 2: run Fx_FastExtract on each partition in parallel --- */
+    #pragma omp parallel for schedule(dynamic, 1) num_threads(nParts)
+    for ( j = 0; j < nParts; j++ )
+    {
+        Fx_FastExtract( vParts[j], pLocalObjIdMax[j] + 1,
+                        nNewNodesMax, LitCountMax, fCanonDivs, 0, 0 );
+    }
+    /* implicit barrier at end of parallel region */
+
+    /* --- Phase 3: count new nodes per partition, then prefix-sum --- */
+    pNewNodeCounts = ABC_CALLOC( int, nParts );
+    for ( j = 0; j < nParts; j++ )
+    {
+        Vec_WecForEachLevel( vParts[j], vCube, i )
+            if ( Vec_IntSize(vCube) > 0 && Vec_IntEntry(vCube, 0) > pLocalObjIdMax[j] )
+                pNewNodeCounts[j]++;
+    }
+
+    /* prefix-sum: offsets[j] = first global new-node ID for partition j.
+       Anchored to globalObjIdMax+1 so no ID overlaps any original ObjId. */
+    pOffsets = ABC_ALLOC( int, nParts );
+    pOffsets[0] = globalObjIdMax + 1;
+    for ( j = 1; j < nParts; j++ )
+        pOffsets[j] = pOffsets[j-1] + pNewNodeCounts[j-1];
+
+    /* --- Phase 4: remap new-node IDs to global range (parallel) --- */
+    #pragma omp parallel for schedule(static) num_threads(nParts)
+    for ( j = 0; j < nParts; j++ )
+        Fx_RemapNewNodes( vParts[j], pLocalObjIdMax[j], pOffsets[j] );
+    /* implicit barrier */
+
+    /* --- Phase 5: merge into a single sorted vCubes --- */
+    anyChanged = 0;
+    for ( j = 0; j < nParts; j++ )
+        if ( pNewNodeCounts[j] > 0 )
+            { anyChanged = 1; break; }
+
+    if ( anyChanged )
+    {
+        vMerged = Fx_MergeCubes( vParts, nParts, pLocalObjIdMax );
+        Abc_NtkFxInsert( pNtk, vMerged );
+        Vec_WecFree( vMerged );
         if ( !Abc_NtkCheck( pNtk ) )
             printf( "Abc_NtkFxPerform: The network check has failed.\n" );
-        return 1;
     }
     else
         printf( "Warning: The network has not been changed by \"fx\".\n" );
-    Vec_WecFree( vCubes );
-    return 0;
+
+    /* cleanup */
+    for ( j = 0; j < nParts; j++ )
+        Vec_WecFree( vParts[j] );
+    ABC_FREE( vParts );
+    ABC_FREE( pLocalObjIdMax );
+    ABC_FREE( pNewNodeCounts );
+    ABC_FREE( pOffsets );
+
+    return anyChanged;
 }
 
 
