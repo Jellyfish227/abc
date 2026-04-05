@@ -311,7 +311,7 @@ int Abc_NtkFxCheck( Abc_Ntk_t * pNtk )
   SeeAlso     []
 
 ***********************************************************************/
-static Vec_Wec_t ** Fx_PartitionCubes( Vec_Wec_t * vCubes, int * pnParts, int * pLocalObjIdMax )
+Vec_Wec_t ** Fx_PartitionCubes( Vec_Wec_t * vCubes, int * pnParts, int * pLocalObjIdMax )
 {
     Vec_Wec_t ** vParts;
     Vec_Int_t * vCube, * vDst;
@@ -390,7 +390,7 @@ static Vec_Wec_t ** Fx_PartitionCubes( Vec_Wec_t * vCubes, int * pnParts, int * 
   SeeAlso     []
 
 ***********************************************************************/
-static void Fx_RemapNewNodes( Vec_Wec_t * vPart, int localObjIdMax, int globalOffset )
+void Fx_RemapNewNodes( Vec_Wec_t * vPart, int localObjIdMax, int globalOffset )
 {
     Vec_Int_t * vCube;
     int i, k, lit, oldVar, newVar;
@@ -433,7 +433,7 @@ static void Fx_RemapNewNodes( Vec_Wec_t * vPart, int localObjIdMax, int globalOf
   SeeAlso     []
 
 ***********************************************************************/
-static Vec_Wec_t * Fx_MergeCubes( Vec_Wec_t ** vParts, int nParts, int * pLocalObjIdMax )
+Vec_Wec_t * Fx_MergeCubes( Vec_Wec_t ** vParts, int nParts, int * pLocalObjIdMax )
 {
     Vec_Wec_t * vMerged;
     Vec_Int_t * vCube, * vDst;

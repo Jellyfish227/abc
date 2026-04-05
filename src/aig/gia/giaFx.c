@@ -24,6 +24,7 @@
 #include "bool/dec/dec.h"
 #include "opt/dau/dau.h"
 #include "misc/util/utilTruth.h"
+#include <omp.h>
 
 ABC_NAMESPACE_IMPL_START
 
@@ -465,29 +466,153 @@ Gia_Man_t * Gia_ManFxInsert( Gia_Man_t * p, Vec_Wec_t * vCubes, Vec_Str_t * vCom
 Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, int fReverse, int fVerbose, int fVeryVerbose )
 {
     extern int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose );
+    extern Vec_Wec_t ** Fx_PartitionCubes( Vec_Wec_t * vCubes, int * pnParts, int * pLocalObjIdMax );
+    extern void Fx_RemapNewNodes( Vec_Wec_t * vPart, int localObjIdMax, int globalOffset );
+    extern Vec_Wec_t * Fx_MergeCubes( Vec_Wec_t ** vParts, int nParts, int * pLocalObjIdMax );
     Gia_Man_t * pNew = NULL;
-    Vec_Wec_t * vCubes;
+    Vec_Wec_t * vCubes, * vMerged;
+    Vec_Wec_t ** vParts;
     Vec_Str_t * vCompl;
+    Vec_Int_t * vCube;
+    int * pLocalObjIdMax, * pNewNodeCounts, * pOffsets;
+    int nParts, globalObjIdMax, j, i, anyChanged;
+
     if ( Gia_ManAndNum(p) == 0 )
     {
         pNew = Gia_ManDup(p);
         Gia_ManTransferTiming( pNew, p );
         return pNew;
     }
-//    abctime clk;
-    assert( Gia_ManHasMapping(p) );   
-    // collect information
+    assert( Gia_ManHasMapping(p) );
+
+    abctime tTotal = Abc_Clock();
+    abctime tPhase;
+
+    /* collect information about the covers */
+    tPhase = Abc_Clock();
     vCubes = Gia_ManFxRetrieve( p, &vCompl, fReverse );
-    // call the fast extract procedure
-//    clk = Abc_Clock();
-    Fx_FastExtract( vCubes, Vec_StrSize(vCompl), nNewNodesMax, LitCountMax, 0, fVerbose, fVeryVerbose );
-//    Abc_PrintTime( 1, "Fx runtime", Abc_Clock() - clk );
-    // insert information
-    pNew = Gia_ManFxInsert( p, vCubes, vCompl );
-    Gia_ManTransferTiming( pNew, p );
-    // cleanup
+    printf( "[GIA-FX] Retrieve: %.2f sec  (%d cubes)\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, Vec_WecSize(vCubes) );
+
+    /* determine number of partitions from OMP_NUM_THREADS */
+    nParts = omp_get_max_threads();
+    if ( nParts < 1 ) nParts = 1;
+    printf( "[GIA-FX] Starting parallel FX with %d partition(s)\n", nParts );
+
+    /* global ObjId ceiling before extraction */
+    globalObjIdMax = Vec_StrSize(vCompl) - 1;
+
+    /* --- Phase 1: partition vCubes into deep-copied chunks --- */
+    tPhase = Abc_Clock();
+    pLocalObjIdMax = ABC_ALLOC( int, nParts );
+    vParts = Fx_PartitionCubes( vCubes, &nParts, pLocalObjIdMax );
+    if ( vParts == NULL || nParts == 0 )
+    {
+        ABC_FREE( pLocalObjIdMax );
+        Vec_WecFree( vCubes );
+        Vec_StrFree( vCompl );
+        printf( "Warning: The network has not been changed by \"fx\".\n" );
+        pNew = Gia_ManDup( p );
+        Gia_ManTransferTiming( pNew, p );
+        return pNew;
+    }
+    printf( "[GIA-FX] Phase 1 (partition): %.2f sec  (%d partitions)\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, nParts );
+
+    /* free original vCubes — work entirely on per-partition copies */
     Vec_WecFree( vCubes );
+    vCubes = NULL;
+
+    /* --- Phase 2: run Fx_FastExtract on each partition in parallel --- */
+    {
+        abctime tPhase2Start = Abc_Clock();
+        #pragma omp parallel for schedule(dynamic, 1) num_threads(nParts)
+        for ( j = 0; j < nParts; j++ )
+        {
+            int tid = omp_get_thread_num();
+            int nthreads = omp_get_num_threads();
+            abctime tPartStart = Abc_Clock();
+            printf( "[OMP] thread %d/%d starting partition %d (cubes=%d)\n",
+                    tid, nthreads, j, Vec_WecSize(vParts[j]) );
+            fflush( stdout );
+            Fx_FastExtract( vParts[j], pLocalObjIdMax[j] + 1,
+                            nNewNodesMax, LitCountMax, 0, 0, 0 );
+            printf( "[OMP] thread %d/%d finished partition %d in %.2f sec\n",
+                    tid, nthreads, j,
+                    (float)(Abc_Clock() - tPartStart) / CLOCKS_PER_SEC );
+            fflush( stdout );
+        }
+        printf( "[GIA-FX] Phase 2 (parallel extraction): %.2f sec\n",
+                (float)(Abc_Clock() - tPhase2Start) / CLOCKS_PER_SEC );
+    }
+
+    /* --- Phase 3: count new nodes per partition, then prefix-sum --- */
+    tPhase = Abc_Clock();
+    pNewNodeCounts = ABC_CALLOC( int, nParts );
+    for ( j = 0; j < nParts; j++ )
+    {
+        Vec_WecForEachLevel( vParts[j], vCube, i )
+            if ( Vec_IntSize(vCube) > 0 && Vec_IntEntry(vCube, 0) > pLocalObjIdMax[j] )
+                pNewNodeCounts[j]++;
+    }
+
+    /* prefix-sum: offsets[j] = first global new-node ID for partition j */
+    pOffsets = ABC_ALLOC( int, nParts );
+    pOffsets[0] = globalObjIdMax + 1;
+    for ( j = 1; j < nParts; j++ )
+        pOffsets[j] = pOffsets[j-1] + pNewNodeCounts[j-1];
+    printf( "[GIA-FX] Phase 3 (count+prefix-sum): %.2f sec\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+
+    /* --- Phase 4: remap new-node IDs to global range (parallel) --- */
+    tPhase = Abc_Clock();
+    #pragma omp parallel for schedule(static) num_threads(nParts)
+    for ( j = 0; j < nParts; j++ )
+        Fx_RemapNewNodes( vParts[j], pLocalObjIdMax[j], pOffsets[j] );
+    printf( "[GIA-FX] Phase 4 (remap): %.2f sec\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+
+    /* --- Phase 5: merge into a single sorted vCubes, then insert --- */
+    tPhase = Abc_Clock();
+    anyChanged = 0;
+    for ( j = 0; j < nParts; j++ )
+        if ( pNewNodeCounts[j] > 0 )
+            { anyChanged = 1; break; }
+
+    if ( anyChanged )
+    {
+        vMerged = Fx_MergeCubes( vParts, nParts, pLocalObjIdMax );
+        /* grow vCompl to cover new node IDs so Gia_ManFxInsert can index it */
+        {
+            int nNewTotal = 0;
+            for ( j = 0; j < nParts; j++ )
+                nNewTotal += pNewNodeCounts[j];
+            Vec_StrFillExtra( vCompl, Vec_StrSize(vCompl) + nNewTotal, 0 );
+        }
+        pNew = Gia_ManFxInsert( p, vMerged, vCompl );
+        Vec_WecFree( vMerged );
+    }
+    else
+    {
+        printf( "Warning: The network has not been changed by \"fx\".\n" );
+        pNew = Gia_ManDup( p );
+    }
+    printf( "[GIA-FX] Phase 5 (merge+insert): %.2f sec\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+    printf( "[GIA-FX] Total wall time: %.2f sec\n",
+            (float)(Abc_Clock() - tTotal) / CLOCKS_PER_SEC );
+
+    Gia_ManTransferTiming( pNew, p );
+
+    /* cleanup */
+    for ( j = 0; j < nParts; j++ )
+        Vec_WecFree( vParts[j] );
+    ABC_FREE( vParts );
+    ABC_FREE( pLocalObjIdMax );
+    ABC_FREE( pNewNodeCounts );
+    ABC_FREE( pOffsets );
     Vec_StrFree( vCompl );
+
     return pNew;
 }
 
