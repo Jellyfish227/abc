@@ -542,14 +542,16 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
             int tid = omp_get_thread_num();
             int nthreads = omp_get_num_threads();
             abctime tPartStart = Abc_Clock();
-            printf( "[OMP] thread %d/%d starting partition %d (cubes=%d)\n",
-                    tid, nthreads, j, Vec_WecSize(vParts[j]) );
+            // DEBUG Print
+            // printf( "[OMP] thread %d/%d starting partition %d (cubes=%d)\n",
+                    // tid, nthreads, j, Vec_WecSize(vParts[j]) );
             fflush( stdout );
             Fx_FastExtract( vParts[j], pLocalObjIdMax[j] + 1,
                             nNewNodesMax, LitCountMax, fCanonDivs, 0, 0 );
-            printf( "[OMP] thread %d/%d finished partition %d in %.2f sec\n",
-                    tid, nthreads, j,
-                    (float)(Abc_Clock() - tPartStart) / CLOCKS_PER_SEC );
+            // DEBUG Print
+            // printf( "[OMP] thread %d/%d finished partition %d in %.2f sec\n",
+                    // tid, nthreads, j,
+                    // (float)(Abc_Clock() - tPartStart) / CLOCKS_PER_SEC );
             fflush( stdout );
         }
         /* implicit barrier at end of parallel region */
@@ -557,14 +559,22 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
                 (float)(Abc_Clock() - tPhase2Start) / CLOCKS_PER_SEC );
     }
 
-    /* --- Phase 3: count new nodes per partition, then prefix-sum --- */
+    /* --- Phase 3: count new nodes per partition, then prefix-sum ---
+       Each new divisor is one ObjId but may have 1 or 2 SOP cubes; counting
+       cubes would overcount and break prefix-sum / remap. New ObjIds in a
+       partition are contiguous, so #new nodes = max(cube[0]) - localObjIdMax. */
     tPhase = Abc_Clock();
     pNewNodeCounts = ABC_CALLOC( int, nParts );
     for ( j = 0; j < nParts; j++ )
     {
+        int maxId = pLocalObjIdMax[j];
         Vec_WecForEachLevel( vParts[j], vCube, i )
-            if ( Vec_IntSize(vCube) > 0 && Vec_IntEntry(vCube, 0) > pLocalObjIdMax[j] )
-                pNewNodeCounts[j]++;
+        {
+            if ( Vec_IntSize(vCube) == 0 )
+                continue;
+            maxId = Abc_MaxInt( maxId, Vec_IntEntry(vCube, 0) );
+        }
+        pNewNodeCounts[j] = maxId - pLocalObjIdMax[j];
     }
 
     /* prefix-sum: offsets[j] = first global new-node ID for partition j.
@@ -1461,14 +1471,16 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
     tPhase = Abc_Clock();
     Fx_ManCreateLiterals( p, ObjIdMax );
     Fx_ManComputeLevel( p );
-    printf( "[FX tid=%d]   setup literals+level: %.2f sec\n",
-            omp_get_thread_num(),
-            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+    // DEBUG Print
+    // printf( "[FX tid=%d]   setup literals+level: %.2f sec\n",
+            // omp_get_thread_num(),
+            // (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
     tPhase = Abc_Clock();
     Fx_ManCreateDivisors( p );
-    printf( "[FX tid=%d]   create divisors: %.2f sec\n",
-            omp_get_thread_num(),
-            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+    // DEBUG Print
+    // printf( "[FX tid=%d]   create divisors: %.2f sec\n",
+            // omp_get_thread_num(),
+            // (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
     if ( fVeryVerbose )
         Fx_PrintDivisors( p );
     if ( fVerbose )
@@ -1485,9 +1497,10 @@ int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitC
         if ( fVeryVeryVerbose )
             Fx_PrintDivisors( p );
     }
-    printf( "[FX tid=%d]   extraction loop (%d iters): %.2f sec\n",
-            omp_get_thread_num(), i,
-            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+    // DEBUG Print
+    // printf( "[FX tid=%d]   extraction loop (%d iters): %.2f sec\n",
+            // omp_get_thread_num(), i,
+            // (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
     if ( fVerbose )
         Fx_PrintStats( p, Abc_Clock() - clk );
     Fx_ManStop( p );

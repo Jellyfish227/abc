@@ -333,7 +333,8 @@ Gia_Man_t * Gia_ManFxInsert( Gia_Man_t * p, Vec_Wec_t * vCubes, Vec_Str_t * vCom
     vOrder = Gia_ManFxTopoOrder( vCubes, Gia_ManCiNum(p), Vec_StrSize(vCompls), &vFirst, &vCount );
     if ( vOrder == NULL )
         return Gia_ManDup( p );
-    assert( Vec_IntSize(vOrder) > Vec_StrSize(vCompls) );
+    /* |vOrder| == nNodeMax; after parallel FX, vCompl is grown to one char per ObjId 0..max, so sizes match */
+    assert( Vec_IntSize(vOrder) >= Vec_StrSize(vCompls) );
     // create new manager
     pNew = Gia_ManStart( Gia_ManObjNum(p) );
     pNew->pName = Abc_UtilStrsav( p->pName );
@@ -491,13 +492,15 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     /* collect information about the covers */
     tPhase = Abc_Clock();
     vCubes = Gia_ManFxRetrieve( p, &vCompl, fReverse );
-    printf( "[GIA-FX] Retrieve: %.2f sec  (%d cubes)\n",
-            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, Vec_WecSize(vCubes) );
+    // DEBUG Print
+    // printf( "[GIA-FX] Retrieve: %.2f sec  (%d cubes)\n",
+    //         (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, Vec_WecSize(vCubes) );
 
     /* determine number of partitions from OMP_NUM_THREADS */
     nParts = omp_get_max_threads();
     if ( nParts < 1 ) nParts = 1;
-    printf( "[GIA-FX] Starting parallel FX with %d partition(s)\n", nParts );
+    // Debug Print
+    // printf( "[GIA-FX] Starting parallel FX with %d partition(s)\n", nParts );
 
     /* global ObjId ceiling before extraction */
     globalObjIdMax = Vec_StrSize(vCompl) - 1;
@@ -532,28 +535,39 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
             int tid = omp_get_thread_num();
             int nthreads = omp_get_num_threads();
             abctime tPartStart = Abc_Clock();
-            printf( "[OMP] thread %d/%d starting partition %d (cubes=%d)\n",
-                    tid, nthreads, j, Vec_WecSize(vParts[j]) );
+            // DEBUG Print
+            // printf( "[OMP] thread %d/%d starting partition %d (cubes=%d)\n",
+                    // tid, nthreads, j, Vec_WecSize(vParts[j]) );
             fflush( stdout );
             Fx_FastExtract( vParts[j], pLocalObjIdMax[j] + 1,
                             nNewNodesMax, LitCountMax, 0, fVerbose, fVeryVerbose );
-            printf( "[OMP] thread %d/%d finished partition %d in %.2f sec\n",
-                    tid, nthreads, j,
-                    (float)(Abc_Clock() - tPartStart) / CLOCKS_PER_SEC );
+            // DEBUG Print
+            // printf( "[OMP] thread %d/%d finished partition %d in %.2f sec\n",
+                    // tid, nthreads, j,
+                    // (float)(Abc_Clock() - tPartStart) / CLOCKS_PER_SEC );
             fflush( stdout );
         }
         printf( "[GIA-FX] Phase 2 (parallel extraction): %.2f sec\n",
                 (float)(Abc_Clock() - tPhase2Start) / CLOCKS_PER_SEC );
     }
 
-    /* --- Phase 3: count new nodes per partition, then prefix-sum --- */
+    /* --- Phase 3: count new nodes per partition, then prefix-sum ---
+       Each new divisor is one ObjId but may have 1 or 2 SOP cubes; count cubes
+       would overcount and oversize vCompl, breaking Gia_ManFxInsert's assert.
+       New ObjIds in a partition are contiguous (localObjIdMax+1 .. max), so
+       #new nodes = max(cube[0]) - localObjIdMax (0 if nothing above local). */
     tPhase = Abc_Clock();
     pNewNodeCounts = ABC_CALLOC( int, nParts );
     for ( j = 0; j < nParts; j++ )
     {
+        int maxId = pLocalObjIdMax[j];
         Vec_WecForEachLevel( vParts[j], vCube, i )
-            if ( Vec_IntSize(vCube) > 0 && Vec_IntEntry(vCube, 0) > pLocalObjIdMax[j] )
-                pNewNodeCounts[j]++;
+        {
+            if ( Vec_IntSize(vCube) == 0 )
+                continue;
+            maxId = Abc_MaxInt( maxId, Vec_IntEntry(vCube, 0) );
+        }
+        pNewNodeCounts[j] = maxId - pLocalObjIdMax[j];
     }
 
     /* prefix-sum: offsets[j] = first global new-node ID for partition j */
