@@ -215,7 +215,7 @@ Gia_Man_t * Gia_ManAigSyn4( Gia_Man_t * p, int fVerbose, int fVeryVerbose )
     if ( fVerbose )     Gia_ManPrintStats( pNew, NULL );
 //    Gia_ManStop( pTemp );
     // perform extraction
-    pNew = Gia_ManPerformFx( pTemp = pNew, ABC_INFINITY, 0, 0, fVeryVerbose, 0 );
+    pNew = Gia_ManPerformFx( pTemp = pNew, ABC_INFINITY, 0, 0, fVeryVerbose, 0, 0, 0 );
     if ( fVerbose )     Gia_ManPrintStats( pNew, NULL );
     Gia_ManStop( pTemp );
     // perform balancing
@@ -228,7 +228,7 @@ Gia_Man_t * Gia_ManAigSyn4( Gia_Man_t * p, int fVerbose, int fVeryVerbose )
     if ( fVerbose )     Gia_ManPrintStats( pNew, NULL );
 //    Gia_ManStop( pTemp );
     // perform extraction
-    pNew = Gia_ManPerformFx( pTemp = pNew, ABC_INFINITY, 0, 0, fVeryVerbose, 0 );
+    pNew = Gia_ManPerformFx( pTemp = pNew, ABC_INFINITY, 0, 0, fVeryVerbose, 0, 0, 0 );
     if ( fVerbose )     Gia_ManPrintStats( pNew, NULL );
     Gia_ManStop( pTemp );
     // perform balancing

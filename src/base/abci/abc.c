@@ -4524,6 +4524,25 @@ usage:
     return 1;
 }
 
+/* Parse &fx / fx -p: "<n>" => absolute job count; "<m>x" => m * OMP thread count */
+static int Abc_FxParsePartOpt( const char * s, int * pnVal, int * pfMult )
+{
+    int i, last;
+    if ( s == NULL || s[0] == '\0' )
+        return 0;
+    for ( i = 0; s[i]; i++ )
+        ;
+    last = i - 1;
+    if ( last >= 1 && ( s[last] == 'x' || s[last] == 'X' ) )
+    {
+        *pfMult = 1;
+        *pnVal  = atoi( s );
+        return *pnVal > 0;
+    }
+    *pfMult = 0;
+    *pnVal  = atoi( s );
+    return *pnVal > 0;
+}
 
 /**Function*************************************************************
 
@@ -4538,18 +4557,31 @@ usage:
 ***********************************************************************/
 int Abc_CommandFastExtract( Abc_Frame_t * pAbc, int argc, char ** argv )
 {
-    extern int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int nLitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose );
+    extern int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int nLitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose, int nFxPartReq, int fFxPartIsMult );
     Abc_Ntk_t * pNtk = Abc_FrameReadNtk(pAbc);
     Fxu_Data_t Params, * p = &Params;
     int c, fNewAlgo = 1;
     int nPairsLimit = 1000000000;
+    int nFxPartReq = 0, fFxPartIsMult = 0;
     // set the defaults
     Abc_NtkSetDefaultFxParams( p );
     Extra_UtilGetoptReset();
-    while ( (c = Extra_UtilGetopt(argc, argv, "SDNWMPsdzcnxvwh")) != EOF )
+    while ( (c = Extra_UtilGetopt(argc, argv, "SDNWMPsdzcnxvwhp:")) != EOF )
     {
         switch (c)
         {
+            case 'p':
+                if ( globalUtilOptarg == NULL || globalUtilOptarg[0] == '\0' )
+                {
+                    Abc_Print( -1, "Command line switch \"-p\" should be followed by <num> or <num>x.\n" );
+                    goto usage;
+                }
+                if ( !Abc_FxParsePartOpt( globalUtilOptarg, &nFxPartReq, &fFxPartIsMult ) )
+                {
+                    Abc_Print( -1, "Command line switch \"-p\" expects a positive integer or <int>x (times thread count).\n" );
+                    goto usage;
+                }
+                break;
             case 'S':
                 if ( globalUtilOptind >= argc )
                 {
@@ -4675,14 +4707,14 @@ int Abc_CommandFastExtract( Abc_Frame_t * pAbc, int argc, char ** argv )
 
     // the nodes to be merged are linked into the special linked list
     if ( fNewAlgo )
-        Abc_NtkFxPerform( pNtk, p->nNodesExt, p->LitCountMax, p->fCanonDivs, p->fVerbose, p->fVeryVerbose );
+        Abc_NtkFxPerform( pNtk, p->nNodesExt, p->LitCountMax, p->fCanonDivs, p->fVerbose, p->fVeryVerbose, nFxPartReq, fFxPartIsMult );
     else
         Abc_NtkFastExtract( pNtk, p );
     Abc_NtkFxuFreeInfo( p );
     return 0;
 
 usage:
-    Abc_Print( -2, "usage: fx [-SDNWMP <num>] [-sdzcnxvwh]\n");
+    Abc_Print( -2, "usage: fx [-SDNWMP <num>] [-p <n>|<m>x] [-sdzcnxvwh]\n");
     Abc_Print( -2, "\t           performs unate fast extract on the current network\n");
     Abc_Print( -2, "\t-S <num> : max number of single-cube divisors to consider [default = %d]\n", p->nSingleMax );
     Abc_Print( -2, "\t-D <num> : max number of double-cube divisors to consider [default = %d]\n", p->nPairsMax );
@@ -4690,6 +4722,8 @@ usage:
     Abc_Print( -2, "\t-W <num> : lower bound on the weight of divisors to extract [default = %d]\n", p->WeightMin );
     Abc_Print( -2, "\t-M <num> : upper bound on literal count of divisors to extract [default = %d]\n", p->LitCountMax );
     Abc_Print( -2, "\t-P <num> : skip \"fx\" if cube pair count exceeds this limit [default = %d]\n", nPairsLimit );
+    Abc_Print( -2, "\t-p <n>   : use n parallel FX partition jobs (capped by node count) [default = auto]\n" );
+    Abc_Print( -2, "\t-p <m>x  : use m * OMP thread count partition jobs (e.g. -p 8x) [default = auto]\n" );
     Abc_Print( -2, "\t-s       : use only single-cube divisors [default = %s]\n", p->fOnlyS? "yes": "no" );
     Abc_Print( -2, "\t-d       : use only double-cube divisors [default = %s]\n", p->fOnlyD? "yes": "no" );
     Abc_Print( -2, "\t-z       : use zero-weight divisors [default = %s]\n", p->fUse0? "yes": "no" );
@@ -38779,12 +38813,25 @@ int Abc_CommandAbc9Fx( Abc_Frame_t * pAbc, int argc, char ** argv )
     int fReverse     =       0;
     int c, fVerbose  =       0;
     int fVeryVerbose =       0;
+    int nFxPartReq = 0, fFxPartIsMult = 0;
     // set the defaults
     Extra_UtilGetoptReset();
-    while ( (c = Extra_UtilGetopt(argc, argv, "NMrvwh")) != EOF )
+    while ( (c = Extra_UtilGetopt(argc, argv, "NMrvp:wh")) != EOF )
     {
         switch (c)
         {
+            case 'p':
+                if ( globalUtilOptarg == NULL || globalUtilOptarg[0] == '\0' )
+                {
+                    Abc_Print( -1, "Command line switch \"-p\" should be followed by <num> or <num>x.\n" );
+                    goto usage;
+                }
+                if ( !Abc_FxParsePartOpt( globalUtilOptarg, &nFxPartReq, &fFxPartIsMult ) )
+                {
+                    Abc_Print( -1, "Command line switch \"-p\" expects a positive integer or <int>x (times thread count).\n" );
+                    goto usage;
+                }
+                break;
             case 'N':
                 if ( globalUtilOptind >= argc )
                 {
@@ -38833,7 +38880,7 @@ int Abc_CommandAbc9Fx( Abc_Frame_t * pAbc, int argc, char ** argv )
         Abc_Print( -1, "Abc_CommandAbc9Shrink(): Mapping of the AIG is not defined.\n" );
         return 1;
     }
-    pTemp = Gia_ManPerformFx( pAbc->pGia, nNewNodesMax, LitCountMax, fReverse, fVerbose, fVeryVerbose );
+    pTemp = Gia_ManPerformFx( pAbc->pGia, nNewNodesMax, LitCountMax, fReverse, fVerbose, fVeryVerbose, nFxPartReq, fFxPartIsMult );
     if ( pTemp != NULL )
         Abc_FrameUpdateGia( pAbc, pTemp );
     else
@@ -38841,10 +38888,12 @@ int Abc_CommandAbc9Fx( Abc_Frame_t * pAbc, int argc, char ** argv )
     return 0;
 
 usage:
-    Abc_Print( -2, "usage: &fx [-NM <num>] [-vh]\n");
+    Abc_Print( -2, "usage: &fx [-NM <num>] [-p <n>|<m>x] [-rvwh]\n");
     Abc_Print( -2, "\t           extract shared logic using the classical \"fast_extract\" algorithm\n");
     Abc_Print( -2, "\t-N <num> : max number of divisors to extract during this run [default = %d]\n", nNewNodesMax );
     Abc_Print( -2, "\t-M <num> : upper bound on literal count of divisors to extract [default = %d]\n", LitCountMax );
+    Abc_Print( -2, "\t-p <n>   : use n parallel FX partition jobs (capped by node count) [default = auto]\n" );
+    Abc_Print( -2, "\t-p <m>x  : use m * OMP thread count partition jobs (e.g. -p 8x) [default = auto]\n" );
     Abc_Print( -2, "\t-r       : reversing variable order during ISOP computation [default = %s]\n", fReverse? "yes": "no" );
     Abc_Print( -2, "\t-v       : print verbose information [default = %s]\n", fVerbose? "yes": "no" );
     Abc_Print( -2, "\t-w       : toggle printing additional information [default = %s]\n", fVeryVerbose? "yes": "no" );

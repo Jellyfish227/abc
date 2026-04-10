@@ -51,7 +51,7 @@ extern Abc_Ntk_t * Abc_NtkFromAigPhase( Aig_Man_t * pMan );
 extern Abc_Ntk_t * Abc_NtkIf( Abc_Ntk_t * pNtk, If_Par_t * pPars );
 extern int Abc_NtkPerformMfs( Abc_Ntk_t * pNtk, Sfm_Par_t * pPars );
 extern Aig_Man_t * Abc_NtkToDar( Abc_Ntk_t * pNtk, int fExors, int fRegisters );
-extern int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int nLitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose );
+extern int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int nLitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose, int nFxPartReq, int fFxPartIsMult );
 
 Abc_Ntk_t * Gia_ManTranStochPut( Gia_Man_t * pGia ) {
   Abc_Ntk_t * pNtk;
@@ -82,7 +82,7 @@ Gia_Man_t * Gia_ManTranStochGet( Abc_Ntk_t * pNtk ) {
 void Gia_ManTranStochFx( Abc_Ntk_t * pNtk ) {
   Fxu_Data_t Params, * p = &Params;
   Abc_NtkSetDefaultFxParams( p );
-  Abc_NtkFxPerform( pNtk, p->nNodesExt, p->LitCountMax, p->fCanonDivs, p->fVerbose, p->fVeryVerbose );
+  Abc_NtkFxPerform( pNtk, p->nNodesExt, p->LitCountMax, p->fCanonDivs, p->fVerbose, p->fVeryVerbose, 0, 0 );
   Abc_NtkFxuFreeInfo( p );
 }
 Gia_Man_t * Gia_ManTranStochRefactor( Gia_Man_t * pGia ) {

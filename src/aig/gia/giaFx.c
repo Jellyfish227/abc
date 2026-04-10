@@ -464,7 +464,7 @@ Gia_Man_t * Gia_ManFxInsert( Gia_Man_t * p, Vec_Wec_t * vCubes, Vec_Str_t * vCom
   SeeAlso     []
 
 ***********************************************************************/
-Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, int fReverse, int fVerbose, int fVeryVerbose )
+Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, int fReverse, int fVerbose, int fVeryVerbose, int nFxPartReq, int fFxPartIsMult )
 {
     extern int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose );
     extern int Fx_CountUniqueCubeNodes( Vec_Wec_t * vCubes );
@@ -500,8 +500,15 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     nThreads = omp_get_max_threads();
     if ( nThreads < 1 ) nThreads = 1;
     nUniqueNodes = Fx_CountUniqueCubeNodes( vCubes );
-    nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nThreads * 8 );
-    printf( "[GIA-FX] Starting parallel FX with %d task(s) on %d thread(s)\n", nParts, nThreads );
+    if ( nFxPartReq <= 0 )
+        nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nThreads * 8 );
+    else if ( fFxPartIsMult )
+        nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nFxPartReq * nThreads );
+    else
+        nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nFxPartReq );
+    printf( "[GIA-FX] Starting parallel FX with %d task(s) on %d thread(s)%s\n",
+            nParts, nThreads,
+            nFxPartReq <= 0 ? "" : ( fFxPartIsMult ? " (-p mult)" : " (-p abs)" ) );
 
     /* global ObjId ceiling before extraction */
     globalObjIdMax = Vec_StrSize(vCompl) - 1;

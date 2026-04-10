@@ -518,7 +518,7 @@ Vec_Wec_t * Fx_MergeCubes( Vec_Wec_t ** vParts, int nParts, int * pLocalObjIdMax
   SeeAlso     []
 
 ***********************************************************************/
-int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose )
+int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose, int nFxPartReq, int fFxPartIsMult )
 {
     extern int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose );
     Vec_Wec_t * vCubes, * vMerged;
@@ -544,8 +544,15 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
     nThreads = omp_get_max_threads();
     if ( nThreads < 1 ) nThreads = 1;
     nUniqueNodes = Fx_CountUniqueCubeNodes( vCubes );
-    nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nThreads * 8 );
-    printf( "[FX] Starting parallel FX with %d task(s) on %d thread(s)\n", nParts, nThreads );
+    if ( nFxPartReq <= 0 )
+        nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nThreads * 8 );
+    else if ( fFxPartIsMult )
+        nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nFxPartReq * nThreads );
+    else
+        nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nFxPartReq );
+    printf( "[FX] Starting parallel FX with %d task(s) on %d thread(s)%s\n",
+            nParts, nThreads,
+            nFxPartReq <= 0 ? "" : ( fFxPartIsMult ? " (-p mult)" : " (-p abs)" ) );
 
     /* compute global ObjId ceiling (max across entire network before extraction) */
     globalObjIdMax = Abc_NtkObjNumMax( pNtk ) - 1;
