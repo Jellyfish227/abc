@@ -334,7 +334,7 @@ Gia_Man_t * Gia_ManFxInsert( Gia_Man_t * p, Vec_Wec_t * vCubes, Vec_Str_t * vCom
     if ( vOrder == NULL )
         return Gia_ManDup( p );
     /* |vOrder| == nNodeMax; after parallel FX, vCompl is grown to one char per ObjId 0..max, so sizes match */
-    assert( Vec_IntSize(vOrder) >= Vec_StrSize(vCompls) );
+    assert( Vec_IntSize(vOrder) > Vec_StrSize(vCompls) );
     // create new manager
     pNew = Gia_ManStart( Gia_ManObjNum(p) );
     pNew->pName = Abc_UtilStrsav( p->pName );
@@ -492,15 +492,13 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     /* collect information about the covers */
     tPhase = Abc_Clock();
     vCubes = Gia_ManFxRetrieve( p, &vCompl, fReverse );
-    // DEBUG Print
-    // printf( "[GIA-FX] Retrieve: %.2f sec  (%d cubes)\n",
-    //         (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, Vec_WecSize(vCubes) );
+    printf( "[GIA-FX] Retrieve: %.2f sec  (%d cubes)\n",
+            (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, Vec_WecSize(vCubes) );
 
     /* determine number of partitions from OMP_NUM_THREADS */
     nParts = omp_get_max_threads();
     if ( nParts < 1 ) nParts = 1;
-    // Debug Print
-    // printf( "[GIA-FX] Starting parallel FX with %d partition(s)\n", nParts );
+    printf( "[GIA-FX] Starting parallel FX with %d partition(s)\n", nParts );
 
     /* global ObjId ceiling before extraction */
     globalObjIdMax = Vec_StrSize(vCompl) - 1;
