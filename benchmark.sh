@@ -84,7 +84,7 @@ while IFS=$'\t' read -r size file; do
     echo "========================================================================================="
     echo "Processing [$counter/$total]: $file (actual size: $readable_size)"
     echo "-----------------------------------------------------------------------------------------"
-    ABC_CMD="&r -s $file; &ps; &fx -v; &ps;"
+    ABC_CMD="&r -s $file; &ps; &fx -v; &ps"
     [[ $RUN_CEC -eq 1 ]] && \
         ABC_CMD="$ABC_CMD; &put; &w $POST_DIR/$POST_PREFIX-$filename"
 
