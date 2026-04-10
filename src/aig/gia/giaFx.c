@@ -475,8 +475,8 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     Vec_Wec_t ** vParts;
     Vec_Str_t * vCompl;
     Vec_Int_t * vCube;
-    int * pLocalObjIdMax, * pNewNodeCounts, * pOffsets;
-    int nParts, globalObjIdMax, j, i, anyChanged;
+    int * pLocalObjIdMax, * pNewNodeCounts, * pOffsets, * pPartLitCounts;
+    int nParts, globalObjIdMax, j, i, anyChanged, nLitFinal;
 
     if ( Gia_ManAndNum(p) == 0 )
     {
@@ -556,6 +556,8 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
        #new nodes = max(cube[0]) - localObjIdMax (0 if nothing above local). */
     tPhase = Abc_Clock();
     pNewNodeCounts = ABC_CALLOC( int, nParts );
+    pPartLitCounts = ABC_CALLOC( int, nParts );
+    nLitFinal = 0;
     for ( j = 0; j < nParts; j++ )
     {
         int maxId = pLocalObjIdMax[j];
@@ -564,8 +566,10 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
             if ( Vec_IntSize(vCube) == 0 )
                 continue;
             maxId = Abc_MaxInt( maxId, Vec_IntEntry(vCube, 0) );
+            pPartLitCounts[j] += Vec_IntSize(vCube) - 1;
         }
         pNewNodeCounts[j] = maxId - pLocalObjIdMax[j];
+        nLitFinal += pPartLitCounts[j];
     }
 
     /* prefix-sum: offsets[j] = first global new-node ID for partition j */
@@ -575,6 +579,7 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
         pOffsets[j] = pOffsets[j-1] + pNewNodeCounts[j-1];
     printf( "[GIA-FX] Phase 3 (count+prefix-sum): %.2f sec\n",
             (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC );
+    printf( "[GIA-FX] Final nLit after merge = %d\n", nLitFinal );
 
     /* --- Phase 4: remap new-node IDs to global range (parallel) --- */
     tPhase = Abc_Clock();
@@ -622,6 +627,7 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     ABC_FREE( vParts );
     ABC_FREE( pLocalObjIdMax );
     ABC_FREE( pNewNodeCounts );
+    ABC_FREE( pPartLitCounts );
     ABC_FREE( pOffsets );
     Vec_StrFree( vCompl );
 
