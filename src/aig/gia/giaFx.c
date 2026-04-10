@@ -467,6 +467,7 @@ Gia_Man_t * Gia_ManFxInsert( Gia_Man_t * p, Vec_Wec_t * vCubes, Vec_Str_t * vCom
 Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, int fReverse, int fVerbose, int fVeryVerbose )
 {
     extern int Fx_FastExtract( Vec_Wec_t * vCubes, int ObjIdMax, int nNewNodesMax, int LitCountMax, int fCanonDivs, int fVerbose, int fVeryVerbose );
+    extern int Fx_CountUniqueCubeNodes( Vec_Wec_t * vCubes );
     extern Vec_Wec_t ** Fx_PartitionCubes( Vec_Wec_t * vCubes, int * pnParts, int * pLocalObjIdMax );
     extern void Fx_RemapNewNodes( Vec_Wec_t * vPart, int localObjIdMax, int globalOffset );
     extern Vec_Wec_t * Fx_MergeCubes( Vec_Wec_t ** vParts, int nParts, int * pLocalObjIdMax );
@@ -476,7 +477,7 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     Vec_Str_t * vCompl;
     Vec_Int_t * vCube;
     int * pLocalObjIdMax, * pNewNodeCounts, * pOffsets, * pPartLitCounts;
-    int nParts, globalObjIdMax, j, i, anyChanged, nLitFinal;
+    int nParts, nThreads, nUniqueNodes, globalObjIdMax, j, i, anyChanged, nLitFinal;
 
     if ( Gia_ManAndNum(p) == 0 )
     {
@@ -495,10 +496,12 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     printf( "[GIA-FX] Retrieve: %.2f sec  (%d cubes)\n",
             (float)(Abc_Clock() - tPhase) / CLOCKS_PER_SEC, Vec_WecSize(vCubes) );
 
-    /* determine number of partitions from OMP_NUM_THREADS */
-    nParts = omp_get_max_threads();
-    if ( nParts < 1 ) nParts = 1;
-    printf( "[GIA-FX] Starting parallel FX with %d partition(s)\n", nParts );
+    /* thread count from OMP; many partition tasks so schedule(dynamic) can rebalance */
+    nThreads = omp_get_max_threads();
+    if ( nThreads < 1 ) nThreads = 1;
+    nUniqueNodes = Fx_CountUniqueCubeNodes( vCubes );
+    nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nThreads * 8 );
+    printf( "[GIA-FX] Starting parallel FX with %d task(s) on %d thread(s)\n", nParts, nThreads );
 
     /* global ObjId ceiling before extraction */
     globalObjIdMax = Vec_StrSize(vCompl) - 1;
@@ -527,7 +530,7 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
     /* --- Phase 2: run Fx_FastExtract on each partition in parallel --- */
     {
         abctime tPhase2Start = Abc_Clock();
-        #pragma omp parallel for schedule(dynamic, 1) num_threads(nParts)
+        #pragma omp parallel for schedule(dynamic, 1) num_threads(nThreads)
         for ( j = 0; j < nParts; j++ )
         {
             int tid = omp_get_thread_num();
@@ -583,7 +586,7 @@ Gia_Man_t * Gia_ManPerformFx( Gia_Man_t * p, int nNewNodesMax, int LitCountMax, 
 
     /* --- Phase 4: remap new-node IDs to global range (parallel) --- */
     tPhase = Abc_Clock();
-    #pragma omp parallel for schedule(static) num_threads(nParts)
+    #pragma omp parallel for schedule(static) num_threads(nThreads)
     for ( j = 0; j < nParts; j++ )
         Fx_RemapNewNodes( vParts[j], pLocalObjIdMax[j], pOffsets[j] );
     printf( "[GIA-FX] Phase 4 (remap): %.2f sec\n",

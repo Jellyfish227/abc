@@ -298,6 +298,39 @@ int Abc_NtkFxCheck( Abc_Ntk_t * pNtk )
 
 /**Function*************************************************************
 
+  Synopsis    [Counts distinct node ObjIds in vCubes scan order.]
+
+  Description [Matches the node-boundary logic used by Fx_PartitionCubes.]
+
+  SideEffects []
+
+  SeeAlso     [Fx_PartitionCubes]
+
+***********************************************************************/
+int Fx_CountUniqueCubeNodes( Vec_Wec_t * vCubes )
+{
+    Vec_Int_t * vCube;
+    int i, nCubes, iCurNode, iNode, count;
+    nCubes = Vec_WecSize( vCubes );
+    if ( nCubes == 0 )
+        return 0;
+    count    = 0;
+    iCurNode = -1;
+    for ( i = 0; i < nCubes; i++ )
+    {
+        vCube = Vec_WecEntry( vCubes, i );
+        iNode = Vec_IntEntry( vCube, 0 );
+        if ( iNode != iCurNode )
+        {
+            count++;
+            iCurNode = iNode;
+        }
+    }
+    return count;
+}
+
+/**Function*************************************************************
+
   Synopsis    [Partitions vCubes into nParts independent chunks.]
 
   Description [Splits at node boundaries (never splits cubes of the same
@@ -492,7 +525,7 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
     Vec_Wec_t ** vParts;
     Vec_Int_t * vCube;
     int * pLocalObjIdMax, * pNewNodeCounts, * pOffsets;
-    int nParts, globalObjIdMax, j, i, anyChanged;
+    int nParts, nThreads, nUniqueNodes, globalObjIdMax, j, i, anyChanged;
 
     assert( Abc_NtkIsSopLogic(pNtk) );
     if ( !Abc_NtkFxCheck(pNtk) )
@@ -507,10 +540,12 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
     /* collect information about the covers */
     vCubes = Abc_NtkFxRetrieve( pNtk );
 
-    /* determine number of partitions from OMP_NUM_THREADS */
-    nParts = omp_get_max_threads();
-    if ( nParts < 1 ) nParts = 1;
-    printf( "[FX] Starting parallel FX with %d partition(s)\n", nParts );
+    /* thread count from OMP; many partition tasks so schedule(dynamic) can rebalance */
+    nThreads = omp_get_max_threads();
+    if ( nThreads < 1 ) nThreads = 1;
+    nUniqueNodes = Fx_CountUniqueCubeNodes( vCubes );
+    nParts = nUniqueNodes < 1 ? 1 : Abc_MinInt( nUniqueNodes, nThreads * 8 );
+    printf( "[FX] Starting parallel FX with %d task(s) on %d thread(s)\n", nParts, nThreads );
 
     /* compute global ObjId ceiling (max across entire network before extraction) */
     globalObjIdMax = Abc_NtkObjNumMax( pNtk ) - 1;
@@ -536,7 +571,7 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
     /* --- Phase 2: run Fx_FastExtract on each partition in parallel --- */
     {
         abctime tPhase2Start = Abc_Clock();
-        #pragma omp parallel for schedule(dynamic, 1) num_threads(nParts)
+        #pragma omp parallel for schedule(dynamic, 1) num_threads(nThreads)
         for ( j = 0; j < nParts; j++ )
         {
             int tid = omp_get_thread_num();
@@ -588,7 +623,7 @@ int Abc_NtkFxPerform( Abc_Ntk_t * pNtk, int nNewNodesMax, int LitCountMax, int f
 
     /* --- Phase 4: remap new-node IDs to global range (parallel) --- */
     tPhase = Abc_Clock();
-    #pragma omp parallel for schedule(static) num_threads(nParts)
+    #pragma omp parallel for schedule(static) num_threads(nThreads)
     for ( j = 0; j < nParts; j++ )
         Fx_RemapNewNodes( vParts[j], pLocalObjIdMax[j], pOffsets[j] );
     /* implicit barrier */
