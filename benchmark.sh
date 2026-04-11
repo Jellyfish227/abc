@@ -117,12 +117,7 @@ case "$PART_MODE" in
         SWEEP_LIST+=("${PART_M}x:p${PART_M}x")
         ;;
     sweep)
-        for ((i=1; i<=NPROC; i++)); do
-            SWEEP_LIST+=("${i}:p${i}")
-        done
-        for ((m=1; m<=16; m++)); do
-            SWEEP_LIST+=("${m}x:p${m}x")
-        done
+        SWEEP_LIST+=( "1:p1" "20:p20" "40:p40" "1x:p1x" "8x:p8x" "16x:p16x" )
         ;;
 esac
 
@@ -137,7 +132,7 @@ case "$PART_MODE" in
     default) echo "Partition: default (no -p)" ;;
     exact)   echo "Partition: exact -p $PART_N" ;;
     multi)   echo "Partition: -p ${PART_M}x  (${PART_M}× nproc jobs, capped by nodes)" ;;
-    sweep)   echo "Partition: sweep — -p 1..$NPROC then -p 1x..16x (${#SWEEP_LIST[@]} passes)" ;;
+    sweep)   echo "Partition: sweep — -p 1, 20, 40, 1x, 8x, 16x (${#SWEEP_LIST[@]} passes)" ;;
 esac
 echo
 
